@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "glomap-jax"
+version = "0.1.0"
+description = "Differentiable GLOMAP-mode aerosol microphysics in Python/JAX, ported faithfully from the UKCA Fortran"
+readme = "README.md"
+license = { file = "LICENCE" }
+authors = [{ name = "Ali Akherati", email = "ali@reflective.org" }]
+requires-python = ">=3.11"
+dependencies = [
+    "jax>=0.4.30",
+    "numpy",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "scipy",
+]
+dev = [
+    "pytest",
+    "scipy",
+    "ruff",
+    "mkdocs-material",
+    "mkdocstrings[python]",
+    # Required by numpy.f2py -c, which drives the in-process Fortran
+    # comparison (Gate A). Not needed to import or test the pure-Python port.
+    "meson",
+    "ninja",
+]
+# Order 3 targets NVIDIA CUDA. Kept out of the default dependency set so a
+# plain `pip install .` stays CPU-only and portable.
+gpu = ["jax[cuda12]>=0.4.30"]
+
+[project.urls]
+Repository = "https://github.com/reflective-org/GLOMAP-JAX"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/glomap_jax"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "slow: long-running soak tests (deselect with '-m \"not slow\"')",
+    # CI has no gfortran/meson/ninja. Anything that builds or runs the Fortran
+    # reference carries this marker and skips cleanly when the toolchain is
+    # absent, so the suite stays green on every commit.
+    "fortran: needs a Fortran toolchain to build/run the reference",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "NPY", "RUF"]

@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# fortran reference build products (regenerated, never committed)
+fortran/build/
+fortran/bin/
+fortran/build-debug/
+fortran/bin-debug/
+*.o
+*.mod
+*.so
+
+# run output
+out/
