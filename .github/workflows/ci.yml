@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Weekly soak, Monday 04:00 UTC. Slow tests are deselected from the normal
+    # `test` job so PRs stay fast.
+    - cron: "0 4 * * 1"
+  workflow_dispatch:
+
+# GLOMAP branches on thresholds down to 1e-40; float32 selects a different
+# closed-form solver branch. Set globally so no job can accidentally run in f32.
+env:
+  JAX_ENABLE_X64: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check src tests validation scripts benchmarks
+      - run: ruff format --check src tests validation scripts benchmarks
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: pip install -e ".[test]"
+      # No gfortran/meson/ninja here on purpose: tests marked `fortran` must
+      # skip cleanly rather than fail, so the pure-Python port is always
+      # verifiable without a Fortran toolchain.
+      - run: pytest -q -m "not slow"
+
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test]"
+      - run: pytest -q -m "not slow"
+
+  soak:
+    # Long-running trajectory and convergence tests. Scheduled/manual only.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test]"
+      - run: pytest -q
