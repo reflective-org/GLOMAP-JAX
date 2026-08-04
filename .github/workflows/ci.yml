@@ -24,8 +24,11 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install ruff
-      - run: ruff check src tests validation scripts benchmarks
-      - run: ruff format --check src tests validation scripts benchmarks
+      # Lint the repo root, not a hardcoded path list: git does not track empty
+      # directories, so naming dirs that do not yet contain files fails E902 in a
+      # clean clone while passing locally.
+      - run: ruff check .
+      - run: ruff format --check .
 
   test:
     runs-on: ubuntu-latest

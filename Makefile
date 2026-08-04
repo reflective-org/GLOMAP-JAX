@@ -34,12 +34,12 @@ test-all:
 	$(PYTEST) -q
 
 lint:
-	$(RUFF) check src tests validation scripts benchmarks
-	$(RUFF) format --check src tests validation scripts benchmarks
+	$(RUFF) check .
+	$(RUFF) format --check .
 
 fmt:
-	$(RUFF) format src tests validation scripts benchmarks
-	$(RUFF) check --fix src tests validation scripts benchmarks
+	$(RUFF) format .
+	$(RUFF) check --fix .
 
 docs:
 	$(MKDOCS) build --strict
