@@ -16,10 +16,11 @@ roughly 370x larger. Two consequences:
 * It independently confirms that gating a 24-hour trajectory at 1e-9 was never
   achievable, which is why that run is now a soak at ``RTOL_SOAK``.
 
-Note the CSV output resolves ~1e-7 relative (``ES14.6``, 7 significant digits),
-so a 3.7e-4 signal is real and not a truncation artefact. That headroom is
-adequate for *this* measurement and nowhere near adequate for validating the
-port, which is why task 11b adds a high-precision dump.
+The shipped CSV writer emits ``ES14.6`` — 7 significant digits, resolving ~1e-7
+relative. Adequate for measuring a 3.7e-4 floor, and four to seven orders of
+magnitude short of the tolerances the port is gated at (``RTOL_STEP = 1e-11``,
+``RTOL_ALGEBRAIC = 1e-13``). Task 11b raises it to ``ES24.16`` via a build-time
+overlay, so the reference can actually carry the precision it computes in.
 """
 
 import csv
@@ -135,3 +136,46 @@ def test_toolchain_is_recorded(built):
     text = (built / "TOOLCHAIN.txt").read_text(encoding="utf-8")
     assert "gfortran:" in text
     assert "-ffp-contract=off" in text
+
+
+@needs_gfortran
+def test_reference_output_carries_full_double_precision(built, tmp_path):
+    """Task 11b: the overlay must deliver ~17 significant digits, not 7.
+
+    Without this, a -fdefault-real-8 reference is truncated at output to the
+    same 7 digits as the single-precision one, and Gate C cannot be met at any
+    tolerance the policy actually gates on.
+
+    Asserted on an evolved field rather than the initial state: a value like
+    1.0000000000000000E-08 is wide but carries no information, so field width
+    alone would not distinguish a real precision gain from padding.
+    """
+    out = tmp_path / "hp.csv"
+    _run(built / "bin-ref-f64" / "glomap_box", out, built / "namelists" / "boundary_layer.nml")
+    rows = list(csv.reader(out.open()))
+    header = [h.strip() for h in rows[0]]
+    col = next(i for i, h in enumerate(header) if h.startswith("Ddry_aitsol"))
+
+    last = rows[-1][col].strip()
+    mantissa = last.split("E")[0].replace("-", "").replace(".", "")
+    significant = len(mantissa.rstrip("0"))
+    assert significant >= 15, (
+        f"reference output carries only {significant} significant digits "
+        f"({last!r}); the high-precision overlay is not applied. ES14.6 gives 7."
+    )
+
+
+@needs_gfortran
+def test_high_precision_value_round_trips_through_python(built, tmp_path):
+    """A written value must survive parse -> repr at full double precision."""
+    out = tmp_path / "rt.csv"
+    _run(built / "bin-ref-f64" / "glomap_box", out, built / "namelists" / "boundary_layer.nml")
+    rows = list(csv.reader(out.open()))
+    header = [h.strip() for h in rows[0]]
+    col = next(i for i, h in enumerate(header) if h.startswith("Ddry_aitsol"))
+    text = rows[-1][col].strip()
+    value = float(text)
+    # Re-rendering at the same precision must reproduce the file's digits, i.e.
+    # nothing was lost in the write.
+    assert float(f"{value:.16E}") == value
+    assert abs(value - float(text)) == 0.0
