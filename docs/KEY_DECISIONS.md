@@ -81,3 +81,41 @@ silently skipped.
 
 The one always-active state mutation, `ukca_calc_drydiam`'s undersize reset, IS
 ported — see `drydiam_undersize_reset` in `fidelity.md`.
+
+## ADR-007 — goldens are committed as plain files; no Git LFS
+
+**Decided.** `tests/goldens/*.npz` go into the repository directly.
+
+The concern was real before it was measured: 283 budgets × 48 steps × several
+namelists × 13 hook points is hundreds of megabytes captured naively, and the
+per-substep state dump is the largest stream by an order of magnitude. So the
+question was settled with numbers rather than a guess.
+
+Measured, at the namelists' own 48 steps:
+
+| | one case, as CSV | full set, as `.npz` |
+|---|---|---|
+| trajectory | 0.05 MB | |
+| budgets | 0.13 MB | |
+| state | 15.90 MB | |
+| branches | 3.82 MB | |
+| **total** | **19.89 MB** per case | **0.83 MB** for all four cases and all four modes |
+
+A factor of about 96. Three things do the work, and all three are properties of
+this data rather than of compression in general: the long-format dumps repeat a
+small vocabulary of `site`, `field` and `tag` labels over hundreds of thousands
+of rows, so factorising them into integer codes removes most of the bytes before
+zlib sees them; branch values are 0/1 and 0–7 and are stored as `int8`; and the
+state dump's float64 values contain long runs of exact zeros for inactive modes
+and components.
+
+LFS would buy nothing at this size and cost a great deal: contributors need a
+`git lfs install` step, CI needs LFS quota, and a shallow clone without LFS
+gives pointer files that fail as *corrupt fixtures* rather than as missing ones
+— the worst possible failure mode for a validation gate.
+
+**Would change this:** any single archive above 5 MB, or the set above 25 MB.
+Both are asserted in `tests/test_goldens_manifest.py`, so the decision is
+re-opened by a failing test rather than by someone noticing. The likely trigger
+is not more namelists — it is capturing a multi-box case, where every stream
+scales with `nbox`.

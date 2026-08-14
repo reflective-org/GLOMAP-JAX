@@ -50,6 +50,14 @@ def check(goldens):
     return gm.verify(goldens, goldens / "MANIFEST.json")
 
 
+# ADR-007: goldens are committed as plain files, no Git LFS. These are the
+# tripwires that re-open that decision, and they are deliberately loose -- they
+# exist to catch an order-of-magnitude change (a multi-box capture, say), not to
+# police a few hundred kilobytes. The full set measures 0.83 MB today.
+MAX_ARCHIVE_BYTES = 5_000_000
+MAX_TOTAL_BYTES = 25_000_000
+
+
 # --------------------------------------------------------------------------
 # The state this gate lands in: nothing captured yet.
 # --------------------------------------------------------------------------
@@ -217,3 +225,30 @@ def test_cli_exits_nonzero_on_drift_and_zero_when_clean(goldens, capsys):
     make_archive(goldens / "a.npz", values=np.array([[0.0, 0.0], [0.0, 0.0]]))
     assert gm.main(["--goldens", str(goldens)]) == 1
     assert "values changed" in capsys.readouterr().out
+
+
+# --------------------------------------------------------------------------
+# Size budget (ADR-007). Vacuous until the fixtures land at task 19, and live
+# from then on.
+# --------------------------------------------------------------------------
+
+
+def test_no_single_golden_exceeds_the_per_file_budget():
+    oversized = {
+        p.name: p.stat().st_size
+        for p in gm.GOLDENS.glob("*.npz")
+        if p.stat().st_size > MAX_ARCHIVE_BYTES
+    }
+    assert not oversized, (
+        f"{oversized} exceed {MAX_ARCHIVE_BYTES / 1e6:.0f} MB. ADR-007 says goldens are "
+        f"committed as plain files; re-open it rather than raising this number."
+    )
+
+
+def test_the_golden_set_stays_within_the_lfs_free_budget():
+    total = sum(p.stat().st_size for p in gm.GOLDENS.glob("*.npz"))
+    assert total <= MAX_TOTAL_BYTES, (
+        f"goldens total {total / 1e6:.1f} MB, budget {MAX_TOTAL_BYTES / 1e6:.0f} MB. "
+        f"See ADR-007 -- the likely cause is a multi-box capture, where every stream "
+        f"scales with nbox."
+    )

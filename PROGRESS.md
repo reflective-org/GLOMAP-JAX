@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (11/18)**
+## Phase B — reference harness: **in progress (12/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -55,7 +55,8 @@ Fixed in `3dd6b0f`:
 | 15 | Per-process state-snapshot overlay | `888922b` |
 | 15b | Branch-mask dump overlay (gate 0) | `06d5699` |
 | 16 | `capture_reference.py` with `--mode` dispatch | `16dcb0f` |
-| 17 | Golden manifest drift/orphan gate | this commit |
+| 17 | Golden manifest drift/orphan gate | `76c87a6` |
+| 18 | Fixture size / Git-LFS ADR | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -88,8 +89,10 @@ set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.80 MB** as
 compressed `.npz`, against roughly 70 MB of CSV from the reference. The state
 dump is the bulk of it at 318k rows per case, and compresses to ~0.15 MB once
 its `site`/`field` labels are integer codes rather than repeated strings. Git
-LFS is not warranted; task 18 is now a short ADR recording that with numbers
-rather than an open question.
+LFS is not warranted — recorded as **ADR-007**, with the per-file (5 MB) and
+whole-set (25 MB) budgets asserted in `tests/test_goldens_manifest.py` so the
+decision is re-opened by a failing test rather than by someone noticing. The
+likely trigger is a multi-box capture, where every stream scales with `nbox`.
 
 Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 20b. The additions came out of adversarial review:
@@ -103,7 +106,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 18-23 and 20b.
+Remaining: 19-23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 
