@@ -1,0 +1,20 @@
+site_name: GLOMAP-JAX
+site_description: Differentiable GLOMAP-mode aerosol microphysics in Python/JAX
+repo_url: https://github.com/reflective-org/GLOMAP-JAX
+theme:
+  name: material
+  features: [navigation.sections, content.code.copy]
+nav:
+  - Home: index.md
+  - Architecture: architecture.md
+  - Physics: physics.md
+  - Porting notes: porting-notes.md
+  - Fidelity flags: fidelity.md
+  - Upstream defects: UPSTREAM_DEFECTS.md
+  - Unsupported: unsupported.md
+  - Reference build: REFERENCE_BUILD.md
+  - Decisions: KEY_DECISIONS.md
+markdown_extensions:
+  - admonition
+  - tables
+  - toc: {permalink: true}
