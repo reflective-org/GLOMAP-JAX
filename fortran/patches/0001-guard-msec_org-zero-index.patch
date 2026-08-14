@@ -1,0 +1,17 @@
+--- a/src/ukca/ukca_aero_step.F90	2026-08-01 00:26:55
++++ b/src/ukca/ukca_aero_step.F90	2026-08-01 00:40:59
+@@ -1018,12 +1018,10 @@
+             ! carbon component (mr 16.8 g/mol)
+             ! Hence rescaling is applied solely for ukca_calcnurate using
+             ! factor s0g_to_gc_sec_org = 150/16.8
+-
+-            cp_sec_org=condensable_choice(msec_org)
+-            s0g_to_gc_sec_org=mm_gas(msec_org)/mm(cp_sec_org) ! scaling factor
+-
+ 
+             IF (msec_org > 0) THEN
++              cp_sec_org=condensable_choice(msec_org)
++              s0g_to_gc_sec_org=mm_gas(msec_org)/mm(cp_sec_org) ! scaling factor
+               sec_org(:) = gc(:,msec_org)/s0g_to_gc_sec_org
+             ELSE
+               sec_org(:) = 0.0

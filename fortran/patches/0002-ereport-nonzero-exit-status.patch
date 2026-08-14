@@ -1,0 +1,12 @@
+--- a/src/ukca/ereport_mod.F90
++++ b/src/ukca/ereport_mod.F90
+@@ -47,7 +47,8 @@
+ IF (error_status > 0) THEN
+   WRITE(*,'(A,A,A,A)') 'UKCA ERROR in ',                                       &
+                        TRIM(routine_name), ': ', TRIM(message)
+-  STOP
++  FLUSH(6)
++  STOP 1
+ ELSE IF (error_status < 0) THEN
+   WRITE(*,'(A,A,A,A)') 'UKCA WARNING in ',                                     &
+                        TRIM(routine_name), ': ', TRIM(message)
