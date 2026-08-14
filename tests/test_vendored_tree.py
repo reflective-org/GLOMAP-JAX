@@ -58,8 +58,10 @@ def test_file_count_is_the_full_closure():
 
 def test_no_file_was_added_or_removed():
     actual, expected = set(_actual()), set(_expected())
-    assert not (actual - expected), f"unlisted files in fortran/src/ukca: {sorted(actual - expected)}"
-    assert not (expected - actual), f"listed but missing: {sorted(expected - actual)}"
+    unlisted = sorted(actual - expected)
+    assert not unlisted, f"unlisted files in fortran/src/ukca: {unlisted}"
+    missing = sorted(expected - actual)
+    assert not missing, f"listed but missing from fortran/src/ukca: {missing}"
 
 
 @pytest.mark.parametrize("name", sorted(_expected()) if MANIFEST.is_file() else [])

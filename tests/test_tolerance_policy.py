@@ -25,7 +25,7 @@ def test_atol_scale_does_not_mask_a_real_discrepancy():
 
 def test_max_rel_err_ignores_entries_below_the_floor():
     expected = np.array([1.0, 1.0e-30])
-    actual = np.array([1.0 + 1e-12, 5.0e-30])   # 400% error on a ~zero entry
+    actual = np.array([1.0 + 1e-12, 5.0e-30])  # 400% error on a ~zero entry
     assert max_rel_err(actual, expected, abs_floor=1e-20) == pytest.approx(1e-12, rel=1e-3)
 
 
