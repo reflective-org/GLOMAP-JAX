@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (9/18)**
+## Phase B — reference harness: **in progress (10/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -53,7 +53,8 @@ Fixed in `3dd6b0f`:
 | 12b | `nmts > 1` case | `db0dfad` |
 | 14 | `--dump-budgets` overlay | `474af8f` |
 | 15 | Per-process state-snapshot overlay | `888922b` |
-| 15b | Branch-mask dump overlay (gate 0) | this commit |
+| 15b | Branch-mask dump overlay (gate 0) | `06d5699` |
+| 16 | `capture_reference.py` with `--mode` dispatch | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -81,6 +82,14 @@ Also found: `ukca_calc_drydiam` runs **five** times per chemistry step, not the
 four in the splitting diagram — `glomap_box_state_mod`'s `update_size` calls it
 once more from the driver.
 
+**Fixture size (task 16, and most of task 18's answer).** The complete golden
+set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.80 MB** as
+compressed `.npz`, against roughly 70 MB of CSV from the reference. The state
+dump is the bulk of it at 318k rows per case, and compresses to ~0.15 MB once
+its `site`/`field` labels are integer codes rather than repeated strings. Git
+LFS is not warranted; task 18 is now a short ADR recording that with numbers
+rather than an open question.
+
 Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 20b. The additions came out of adversarial review:
 
@@ -93,7 +102,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 16-23 and 20b.
+Remaining: 17-23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 

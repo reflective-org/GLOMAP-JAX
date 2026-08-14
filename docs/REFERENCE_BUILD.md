@@ -76,6 +76,34 @@ site produced and — for `ukca_solvecoagnucl_v`, where the branch is a five-way
 select rather than a single test — an integer naming the form that ran. See
 `docs/porting-notes.md` for what the shipped fixtures do and do not reach.
 
+## Capturing goldens
+
+```sh
+./validation/build_reference.sh both          # once
+python validation/capture_reference.py --dry-run
+python validation/capture_reference.py        # writes tests/goldens/*.npz
+```
+
+`--dry-run` prints the capture matrix and needs no toolchain, so the plan is
+inspectable before anything is built. The matrix is deliberately **not** a cross
+product of cases × modes × variants: `ref-f32` exists only to measure the
+precision floor against `ref-f64`, and that floor is a property of the
+trajectory, so the trajectory is captured in both variants and the three dumps
+in `f64` only. `--mode`, `--case`, `--variant` and `--steps` narrow it;
+`--steps` in particular gives a cheap smoke capture without a 24-hour run.
+
+Each archive is one `.npz` named `<case>.<variant>.<mode>.npz`. The two wide
+streams store a float64 table plus its column names; the two long-format streams
+store integer columns with their string labels factorised into a codebook, and
+branch values as `int8`. Every archive carries `_case`, `_mode`, `_variant`,
+`_rows` and a SHA-256 of the exact namelist that produced it, so a stale golden
+is distinguishable from a regenerated one.
+
+**The full golden set is 0.80 MB** across all four cases and all four modes —
+roughly 90× smaller than the CSV the reference emits, mostly because the state
+dump's 318k rows per case compress to ~0.15 MB once the labels are codes. Git
+LFS is not needed at this size (task 18 records the decision).
+
 ## Reproducibility — read this before trusting a golden
 
 **Goldens are not portable across compilers or platforms.** Two reasons:
