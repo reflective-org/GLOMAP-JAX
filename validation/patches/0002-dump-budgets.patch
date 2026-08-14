@@ -1,0 +1,175 @@
+Dump bud_aer_mas, the per-process mass-flux array, once per chemistry step.
+
+ukca_aero_step fills 283 budget slots -- condensation by vapour and by mode,
+nucleation, coagulation per mode pair, ageing, mode merging -- and the shipped
+driver allocates the array, zeroes it every step, and never writes it out.
+
+Exposing it is what turns validation from "the final number matches" into
+"H2SO4 condensation onto the accumulation mode matches at step 7". Budgets alone
+are not sufficient (they carry mass fluxes only, no nd/mdt/drydp) which is what
+the state-snapshot overlay adds; but they localise every mass-transfer pathway.
+
+Written AFTER the step and before the next step's reset, since budgets
+accumulate over one chemistry step only. Slot 0 is emitted even though upstream
+never writes it -- every write is IF (nmasxxx > 0) guarded -- so the column
+index equals the Fortran budget index with no off-by-one, and a non-zero value
+there is itself a finding.
+
+Controlled by budget_file in &box_run; empty means not written, so existing
+namelists are unaffected.
+
+Applied to a staged copy at build time; fortran/ is never modified.
+diff --color -ruN a/src/box/glomap_box.F90 b/src/box/glomap_box.F90
+--- a/src/box/glomap_box.F90	2026-08-13 18:34:10
++++ b/src/box/glomap_box.F90	2026-08-13 18:34:10
+@@ -35,7 +35,7 @@
+ USE glomap_box_config_mod,         ONLY: read_box_namelist, init_ukca_for_box,  &
+     run_name, nsteps, dt_chem, nmts, nzts, output_every, output_file, verbose,  &
+     temperature, pressure, rel_humid, spec_humid, height, pbl_height,           &
+-    box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                     &
++    budget_file, box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                     &
+     h2so4_init, h2so4_prod, sec_org_init, sec_org_prod,                         &
+     cond_on, nucl_on, coag_on, bln_on, i_nuc_method, ibln, icoag, imerge,       &
+     ifuchs, idcmfp, icondiam, intraoff, interoff, iactmethod, checkmd_nd,       &
+@@ -45,7 +45,8 @@
+                                          init_state, update_size
+ USE glomap_box_output_mod,         ONLY: open_output, write_output,             &
+                                          close_output, write_header_table,     &
+-                                         write_table_row
++                                         write_table_row, open_budgets,        &
++                                         write_budgets, close_budgets
+ 
+ IMPLICIT NONE
+ 
+@@ -111,6 +112,7 @@
+ dtz     = dt_chem / REAL(MAX(nmts,1) * MAX(nzts,1))
+ 
+ CALL open_output(TRIM(output_file))
++CALL open_budgets(TRIM(budget_file))
+ CALL write_header_table()
+ 
+ time_s = 0.0
+@@ -150,6 +152,10 @@
+     st%s0g_dot, zeros, zeros, st%pvol, st%pvol_wat,                             &
+     jlabove, ilscat, st%n_merge, env%height, env%htpbl)
+ 
++  ! Budgets accumulate over this chemistry step only and are reset at the top of
++  ! the next one, so they must be written before that reset.
++  CALL write_budgets(istep, REAL(istep) * dt_chem, st)
++
+   ! ukca_aero_step returns updated MD/ND and its own dry/wet sizes; refresh
+   ! the diagnostic size and density fields so output is consistent.
+   CALL update_size(st, env)
+@@ -164,6 +170,7 @@
+ END DO
+ 
+ CALL close_output()
++CALL close_budgets()
+ 
+ WRITE(*,'(A)') '======================================================='
+ WRITE(*,'(A,I0,A,F8.1,A)') ' completed ', nsteps, ' steps of ', dt_chem, ' s'
+diff --color -ruN a/src/box/glomap_box_config_mod.F90 b/src/box/glomap_box_config_mod.F90
+--- a/src/box/glomap_box_config_mod.F90	2026-08-13 18:34:10
++++ b/src/box/glomap_box_config_mod.F90	2026-08-13 18:34:10
+@@ -40,6 +40,8 @@
+ INTEGER,           PUBLIC :: nzts        = 15        ! cond/nucl competition substeps
+ INTEGER,           PUBLIC :: output_every = 1        ! write output every N steps
+ CHARACTER(LEN=256),PUBLIC :: output_file = 'glomap_box.csv'
++! Per-process mass-flux dump. Empty => not written.
++CHARACTER(LEN=256),PUBLIC :: budget_file = ''
+ INTEGER,           PUBLIC :: verbose     = 0
+ 
+ ! ---------------------------------------------------------------------------
+@@ -139,7 +141,7 @@
+ CHARACTER(LEN=256) :: iomsg
+ 
+ NAMELIST /box_run/     run_name, nsteps, dt_chem, nmts, nzts,                  &
+-                       output_every, output_file, verbose
++                       output_every, output_file, budget_file, verbose
+ NAMELIST /box_env/     temperature, pressure, rel_humid, spec_humid,           &
+                        height, pbl_height, box_volume
+ NAMELIST /box_aerosol/ i_mode_setup, nd_init, dp_init, mfrac_init,             &
+diff --color -ruN a/src/box/glomap_box_output_mod.F90 b/src/box/glomap_box_output_mod.F90
+--- a/src/box/glomap_box_output_mod.F90	2026-08-13 18:34:10
++++ b/src/box/glomap_box_output_mod.F90	2026-08-13 18:35:40
+@@ -16,12 +16,17 @@
+ PRIVATE
+ 
+ INTEGER, SAVE :: csv_unit = -1
++INTEGER, SAVE :: bud_unit = -1
++! OPEN(NEWUNIT=) returns a NEGATIVE unit number by standard, so neither a
++! `> 0` test nor a -1 sentinel can distinguish open from closed. Track it.
++LOGICAL, SAVE :: bud_open = .FALSE.
+ 
+ CHARACTER(LEN=7), PARAMETER :: mode_name(nmodes) =                             &
+   [ 'nucsol ', 'aitsol ', 'accsol ', 'corsol ',                                &
+     'aitins ', 'accins ', 'corins ', 'supins ' ]
+ 
+ PUBLIC :: open_output, write_output, close_output
++PUBLIC :: open_budgets, write_budgets, close_budgets
+ PUBLIC :: write_header_table, write_table_row
+ 
+ CONTAINS
+@@ -111,6 +116,62 @@
+ WRITE(csv_unit,'(A)') TRIM(row)
+ 
+ END SUBROUTINE write_output
++
++! ---------------------------------------------------------------------------
++SUBROUTINE open_budgets(filename)
++! One column per bud_aer_mas slot, including slot 0. Slot 0 is emitted even
++! though upstream never writes it (every write is IF (nmasxxx > 0) guarded), so
++! the column index equals the Fortran budget index with no off-by-one, and a
++! non-zero value there is itself a finding.
++USE ukca_setup_indices, ONLY: nbudaer
++
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: filename
++INTEGER :: i
++CHARACTER(LEN=1048576) :: hdr
++CHARACTER(LEN=32) :: fld
++
++IF (LEN_TRIM(filename) == 0) RETURN
++OPEN(NEWUNIT=bud_unit, FILE=filename, STATUS='REPLACE', ACTION='WRITE')
++bud_open = .TRUE.
++hdr = 'step,time_s'
++DO i = 0, nbudaer
++  WRITE(fld,'(",bud",I0)') i
++  hdr = TRIM(hdr)//TRIM(fld)
++END DO
++WRITE(bud_unit,'(A)') TRIM(hdr)
++
++END SUBROUTINE open_budgets
++
++! ---------------------------------------------------------------------------
++SUBROUTINE write_budgets(istep, time_s, st)
++USE ukca_setup_indices,   ONLY: nbudaer
++USE glomap_box_state_mod, ONLY: box_state_type
++
++IMPLICIT NONE
++INTEGER,              INTENT(IN) :: istep
++REAL,                 INTENT(IN) :: time_s
++TYPE(box_state_type), INTENT(IN) :: st
++INTEGER :: i
++CHARACTER(LEN=1048576) :: row
++CHARACTER(LEN=32) :: fld
++
++IF (.NOT. bud_open) RETURN
++WRITE(row,'(I0,",",ES24.16)') istep, time_s
++DO i = 0, nbudaer
++  WRITE(fld,'(",",ES24.16)') st%bud_aer_mas(1,i)
++  row = TRIM(row)//TRIM(fld)
++END DO
++WRITE(bud_unit,'(A)') TRIM(row)
++
++END SUBROUTINE write_budgets
++
++! ---------------------------------------------------------------------------
++SUBROUTINE close_budgets()
++IMPLICIT NONE
++IF (bud_open) CLOSE(bud_unit)
++bud_open = .FALSE.
++END SUBROUTINE close_budgets
+ 
+ ! ---------------------------------------------------------------------------
+ SUBROUTINE close_output()
