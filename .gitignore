@@ -20,3 +20,6 @@ fortran/bin-debug/
 # run output
 out/
 site/
+fortran/build-ref-*/
+fortran/bin-ref-*/
+fortran/TOOLCHAIN.txt
