@@ -98,6 +98,65 @@ def test_every_disposition_is_one_of_the_five_kinds(defect):
     }, f"{defect}: unknown disposition {disposition!r}"
 
 
+def _section(defect: str) -> str:
+    text = DEFECTS.read_text(encoding="utf-8")
+    return text.split(f"## {defect} \u2014", 1)[1].split("\n## ", 1)[0]
+
+
+# --------------------------------------------------------------------------
+# Submission readiness (task 23)
+#
+# These get filed against MetOffice/ukca by a human who was not in the room
+# when they were found. A report missing any of these five is one the reader
+# has to reconstruct, and reconstruction is where reports get dropped.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("defect", DEFECT_IDS)
+def test_every_defect_has_a_descriptive_title(defect):
+    """`UP-7 - a bug` helps nobody scanning a tracker."""
+    text = DEFECTS.read_text(encoding="utf-8")
+    title = text.split(f"## {defect} \u2014", 1)[1].split("\n", 1)[0].strip()
+    assert len(title.split()) >= 4, f"{defect}: title too terse: {title!r}"
+
+
+@pytest.mark.parametrize("defect", DEFECT_IDS)
+def test_every_defect_states_its_impact(defect):
+    """Reachability says whether it can happen; impact says what it does when it
+    does. Six of the ten are latent or diagnostic-only, and a report that omits
+    that gets triaged as if it were the other four -- or, worse, the other four
+    get triaged as if they were these six."""
+    assert "**Impact.**" in _section(defect), f"{defect} has no Impact paragraph"
+
+
+@pytest.mark.parametrize("defect", DEFECT_IDS)
+def test_every_defect_suggests_a_patch(defect):
+    """A defect report without a proposed fix asks the maintainer to do the work
+    twice. Where the fix is contentious, the suggestion should say so rather
+    than be omitted -- see UP-3, which proposes a patch and then argues against
+    applying it unreviewed."""
+    section = _section(defect)
+    assert "**Suggested patch.**" in section, f"{defect} suggests no patch"
+    has_diff = "```diff" in section
+    names_patch_file = "fortran/patches/" in section
+    describes = "Correct the header" in section or "Exchange the two" in section
+    assert has_diff or names_patch_file or describes, (
+        f"{defect}: Suggested patch section is prose with no diff, no patch file "
+        f"and no concrete instruction"
+    )
+
+
+@pytest.mark.parametrize("defect", DEFECT_IDS)
+def test_a_results_changing_defect_says_so_in_bold(defect):
+    """The single most important thing a triager reads. Four of the ten change
+    results; the other six must not be dressed as if they do."""
+    reachability = next(
+        r for d, _, r, _ in ROW.findall(DEFECTS.read_text(encoding="utf-8")) if d == defect
+    )
+    if "changes results" in reachability:
+        assert "**" in reachability, f"{defect} changes results but is not emphasised"
+
+
 # --------------------------------------------------------------------------
 # Each disposition is actually realised
 # --------------------------------------------------------------------------

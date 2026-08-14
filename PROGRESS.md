@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (16/18)**
+## Phase B — reference harness: **in progress (17/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -60,7 +60,8 @@ Fixed in `3dd6b0f`:
 | 19 | Commit the reference fixtures | `687d0b3` |
 | 20 | f2py wrapper + in-process binding | `1d060b8` |
 | 21 | Leaf reference-driver pattern + numerics driver | `efd13e7` |
-| 22 | Document the harness; record all upstream defects | this commit |
+| 22 | Document the harness; record all upstream defects | `a1c3859` |
+| 23 | Draft the upstream write-ups for Ali to file | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -155,7 +156,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 23 and 20b.
+Remaining: 20b, then the phase-B review.
 
 ## Phases C–K — physics: not started (0/82)
 
