@@ -18,9 +18,11 @@ and changeable without a recompile.
 Three of these are known hazards where gfortran and XLA need not agree, and
 each grid is built to land on the hazard rather than near it:
 
-* **ERF** feeds `ukca_remode`'s `FRAC_N`, cut at exactly 0.5 — that is,
-  at `erf(x) = 0`. A disagreement there is a merge/no-merge flip, not a
-  rounding difference, so the grid is dense through zero at several scales.
+* **ERF** feeds `ukca_remode`'s `FRAC_N`, cut at 0.5 — that is, at
+  `erf(x) = 0`. That clamp is continuous at the boundary, so the consequence
+  of a disagreement is smaller than the plan assumed (merging itself is gated
+  on `drydp`, not on `erf`), but zero is still the point where the transfer
+  fraction is decided, so the grid is dense through it at several scales.
 * **`x ** (1.0/3.0)`** is what `cubrt_v` literally computes. It is not a cube
   root function, and the constant `1.0/3.0` is itself not exactly a third. The
   grid includes exact cubes, where any honest cube root returns an integer and

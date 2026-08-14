@@ -1,16 +1,19 @@
 """Task 21: the numerics leaf sweep, and what it settles about task 34.
 
-The plan called the transcendental compat layer "the sleeper" — an `erf`
-discrepancy becomes a merge/no-merge flip in `ukca_remode`, and discovering it
-inside phase I costs a day. This file replaces that worry with measurements
-taken against the Fortran itself, over dense grids that land *on* each hazard
-rather than near it.
+The plan called the transcendental compat layer "the sleeper", on the grounds
+that an `erf` discrepancy becomes a merge/no-merge flip in `ukca_remode`. This
+file replaces that worry with measurements taken against the Fortran itself,
+over dense grids that land *on* each hazard rather than near it — and corrects
+the framing: merging is gated on `drydp`, not on `erf`. See
+`test_jax_erf_is_bit_identical_to_gfortran` for where `erf` actually reaches a
+predicate, and `test_cbrt_must_be_written_as_x_to_the_one_third` for the
+primitive that does carry the branch risk.
 
 The measurements, over 15,382 points:
 
 | primitive | JAX vs gfortran | verdict |
 |---|---|---|
-| `erf` | bit-identical, 4330/4330 | the sleeper does not materialise |
+| `erf` | bit-identical, 4330/4330 | not the hazard it was thought to be |
 | `log`, `1/x` | bit-identical | safe |
 | `exp` | 456/3199 differ, max 2.1e-16 (1 ulp) | within tolerance, but real |
 | `x ** (1/3)` | bit-identical | **this** is what `cubrt_v` computes |
@@ -103,12 +106,17 @@ def test_the_vapour_grid_covers_the_whole_clamped_domain(sweep):
 
 
 def test_jax_erf_is_bit_identical_to_gfortran(sweep):
-    """The plan's sleeper risk, measured and dismissed.
+    """The plan's sleeper risk, measured and also re-scoped.
 
-    `ukca_remode`'s `FRAC_N = 0.5*(1 + erf(x))` is cut at exactly 0.5, so a
-    single-ulp disagreement here would be a merge/no-merge flip and an O(1)
-    trajectory difference. There is no disagreement: 4330/4330 points agree
-    bit for bit. The compat layer needs no erf shim."""
+    4330/4330 points agree bit for bit, so the compat layer needs no erf shim.
+
+    The framing needed correcting too. `erf` does not gate merging:
+    `ukca_remode.F90:234` decides that with `dp > dp_thresh1`, a bare
+    comparison on `drydp`. `erf` enters afterwards, to size the transfer. Its
+    `frac_n < 0.5` and `frac_m < 0.001` clamps are continuous at the boundary,
+    so a one-ulp difference costs one ulp; the only discontinuous consumer is
+    `newn > num_eps`, which needs `nd` within a factor of two of 1e-20 to
+    matter. The branch risk the plan attributed here belongs to `cubrt_v`."""
     got = np.asarray(jax.scipy.special.erf(jnp.asarray(sweep["erf_x"])))
     np.testing.assert_array_equal(got, sweep["erf_y"])
 

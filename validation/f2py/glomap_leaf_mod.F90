@@ -25,9 +25,12 @@
 !   volume_mode, the coagulation kernels and binapara alike, and because three
 !   of them are known hazards where gfortran and XLA need not agree:
 !
-!     * ERF feeds `ukca_remode`'s FRAC_N, which is cut at exactly 0.5 --
-!       i.e. at erf(x) = 0. A discrepancy there is a merge/no-merge flip, not
-!       a rounding difference, so the grid below is dense around zero.
+!     * ERF feeds `ukca_remode`'s FRAC_N, cut at 0.5 -- i.e. at erf(x) = 0.
+!       Note this is NOT what decides whether a mode merges: :234 does that
+!       with a bare `dp > dp_thresh1` on drydp. erf sizes the transfer once
+!       merging is already happening, and its clamps are continuous at the
+!       boundary. Swept densely through zero anyway, because that is where the
+!       transfer fraction is decided.
 !
 !     * cubrt_v is literally `x ** (1.0/3.0)`, NOT a cube root function. The
 !       two are not the same computation and need not give the same bits, and

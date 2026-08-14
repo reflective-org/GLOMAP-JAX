@@ -120,15 +120,32 @@ all. It needs constructed fixtures **before** phase I, not after.
 
 ## The transcendental compat layer, measured (task 21 → task 34)
 
-The plan called this the sleeper risk: an `erf` discrepancy becomes a
-merge/no-merge flip in `ukca_remode`, and discovering it inside phase I costs a
-day. `validation/capture_leaf.py` sweeps each primitive through the Fortran
-itself over grids that land *on* each hazard, 15,382 points in total. Results,
-against JAX on the CPU backend in float64:
+The plan called this the sleeper risk, on the grounds that an `erf`
+discrepancy becomes a merge/no-merge flip in `ukca_remode`.
+`validation/capture_leaf.py` sweeps each primitive through the Fortran itself
+over grids that land *on* each hazard, 15,382 points in total.
+
+**First, a correction to that framing.** `erf` does not gate merging.
+`ukca_remode.F90:234` decides whether to merge with
+`IF ((dp > dp_thresh1) .OR. (imerge == 3))` — a bare comparison on `drydp`, no
+`erf` anywhere. `erf` enters only *after* that decision, at `:245` and `:258`,
+to compute how much number and mass to transfer. Its two thresholds,
+`frac_n < 0.5` and `frac_m < 0.001`, are clamps that are **continuous at the
+boundary** — either side gives essentially the same value — so a one-ulp `erf`
+difference perturbs the result by one ulp, not by O(1). The one genuinely
+discontinuous consumer is `newn > num_eps` at `:271`, and since
+`newn = nd·frac_n` with `frac_n ≥ 0.5`, reaching it needs `nd` within a factor
+of two of `num_eps` ≈ 1e-20, where the outer gate has only just opened.
+
+So the merge/no-merge flip is real, but it belongs to **`drydp`**, which comes
+from `cubrt_v` — and that reassigns the risk from `erf` to the cube root, which
+is exactly where the measurements below say it should sit.
+
+Results against JAX on the CPU backend, float64:
 
 | primitive | agreement | verdict |
 |---|---|---|
-| `erf` (via `umErf`) | **bit-identical**, 4330/4330 | the sleeper does not materialise; no shim needed |
+| `erf` (via `umErf`) | **bit-identical**, 4330/4330 | no shim needed |
 | `log`, `1/x` | bit-identical | safe |
 | `x ** (1.0/3.0)` | bit-identical | **this** is what `cubrt_v` computes |
 | `exp` | 456/3199 differ, max 2.1e-16 | one ulp; inside tolerance but real |
@@ -140,9 +157,12 @@ Three rules follow, and all three are asserted in
 
 **Write the cube root as `x ** (1.0/3.0)`.** `cubrt_v` is literally that
 expression; it is not a cube-root function. `np.cbrt` disagrees on 94% of the
-grid by up to 1.3e-14 — a hundred times `RTOL_ALGEBRAIC` — and since `cubrt_v`
-produces `drydp`, which feeds remode's merge threshold and `calc_drydiam`'s
-undersize reset, that is branch-flipping rather than cosmetic. The two also
+grid by up to 1.3e-14 — a hundred times `RTOL_ALGEBRAIC`. This is the one that
+carries the branch risk the plan mis-attributed to `erf`: `cubrt_v` produces
+`drydp`, and `drydp` is compared directly against `dp_thresh1` (merge or not)
+and against `ddplim0·0.1` (rewrite `md`/`mdt` or not). Both are step changes,
+so a parcel sitting within 1.3e-14 of either threshold goes one way in the
+reference and the other in the port. The two also
 disagree about negatives: `x ** (1.0/3.0)` is NaN, `np.cbrt` returns the real
 root. Unreachable today (`dvol >= 0` wherever `cubrt_v` is called), but it is
 the failure a `cbrt` port would produce the first time it wasn't.
