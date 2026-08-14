@@ -33,25 +33,63 @@ FORTRAN="$REPO/fortran"
 
 COMMON_FLAGS="-O2 -ffree-line-length-none -fno-range-check -ffp-contract=off"
 
+# Staged builds. The reference is built from a COPY of the vendored tree with
+# validation/patches/*.patch applied, never from fortran/ itself. That keeps
+# fortran/ byte-comparable with glomap-box (and hash-checkable by the tamper
+# test) while still allowing the instrumentation the harness needs: a
+# high-precision dump, budget output, branch-mask output.
+#
+# Only src/box/ is ever patched. That is new BSD-3 code, not Crown Copyright
+# UKCA, so extending it is permitted; src/ukca/ stays untouched in the stage
+# too, and the stage's own copy is hash-compared against the original.
+STAGE_ROOT="$REPO/.refstage"
+
+stage_tree() {
+  local stage="$STAGE_ROOT/$1"
+  rm -rf "$stage"; mkdir -p "$stage"
+  # -a would drag in build products; copy only what the build needs.
+  for d in src namelists tools tests; do cp -R "$FORTRAN/$d" "$stage/"; done
+  cp "$FORTRAN/Makefile" "$stage/"
+
+  shopt -s nullglob
+  for p in "$REPO"/validation/patches/*.patch; do
+    if ! patch -d "$stage" -p1 --forward --silent < "$p"; then
+      echo "ERROR: overlay failed to apply: $(basename "$p")" >&2
+      return 1
+    fi
+  done
+  shopt -u nullglob
+
+  # The overlays must not have touched UKCA science.
+  if ! diff -rq "$FORTRAN/src/ukca" "$stage/src/ukca" >/dev/null; then
+    echo "ERROR: an overlay modified src/ukca/, which is read-only." >&2
+    return 1
+  fi
+  echo "$stage"
+}
+
 build_variant() {
   local variant="$1" extra=""
-  local build="build-ref-${variant}" bin="bin-ref-${variant}"
-
   case "$variant" in
     f32) extra="" ;;
     f64) extra="-fdefault-real-8" ;;
     *) echo "unknown variant '$variant' (expected f32 or f64)" >&2; return 2 ;;
   esac
 
-  echo "==> building ref-${variant}"
-  make -C "$FORTRAN" \
-       BUILD="$build" BIN="$bin" \
-       FCFLAGS="$COMMON_FLAGS $extra -J $build -I $build" \
+  echo "==> staging and building ref-${variant}"
+  local stage; stage="$(stage_tree "$variant")" || return 1
+
+  make -C "$stage" \
+       BUILD=build BIN=bin \
+       FCFLAGS="$COMMON_FLAGS $extra -J build -I build" \
        >/dev/null
 
-  local exe="$FORTRAN/$bin/glomap_box"
+  local exe="$stage/bin/glomap_box"
   [ -x "$exe" ] || { echo "build produced no executable at $exe" >&2; return 1; }
-  echo "    $exe"
+  # Stable path for callers, independent of the staging layout.
+  mkdir -p "$FORTRAN/bin-ref-${variant}"
+  cp "$exe" "$FORTRAN/bin-ref-${variant}/glomap_box"
+  echo "    $FORTRAN/bin-ref-${variant}/glomap_box"
 }
 
 verify_tree_untouched() {

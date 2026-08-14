@@ -3,13 +3,25 @@
 A faithful port of the UKCA GLOMAP-mode box model — nucleation, condensation,
 coagulation, ageing, mode merging and water uptake.
 
-Importing this package enables 64-bit floating point in JAX, and that is not
-optional. The reference Fortran is validated in double precision, and several
-GLOMAP thresholds sit below float32's range entirely: ``ukca_solvecoagnucl_v``
-branches on a discriminant against ``eps_d = 1e-40`` and mode ``num_eps`` values
-reach ``1e-20``. In float32 those underflow to zero, which does not merely lose
-precision — it changes *which closed-form solution branch is selected*. Import
-``glomap_jax`` before creating any JAX arrays, or set ``JAX_ENABLE_X64=1``.
+Importing this package enables 64-bit floating point in JAX.
+
+The honest reason, stated carefully because an earlier version of this docstring
+got it wrong. It is NOT that GLOMAP's thresholds underflow in float32: ``1e-20``
+is a normal float32 number and ``eps_d = 1e-40`` is subnormal but still greater
+than zero, and the reference Fortran runs in single precision and selects its
+solver branches correctly. The reasons float64 is required are:
+
+* **The reference is double precision.** Validation is against a
+  ``-fdefault-real-8`` build; the measured single-vs-double spread on a 48-step
+  run is 3.7e-4, four orders of magnitude above any tolerance worth gating on.
+* **The tolerances are unreachable in float32.** ``RTOL_STEP = 1e-11`` and
+  ``RTOL_ALGEBRAIC = 1e-13`` need more than float32's ~7 significant digits.
+* **Cancellation.** ``ukca_binapara`` evaluates ``jveh = EXP(P)`` where ``P`` is
+  a ~30-term polynomial whose O(1e3) terms cancel to O(10); float32 would lose
+  most of the result to that cancellation.
+
+Import ``glomap_jax`` before creating any JAX arrays, or set
+``JAX_ENABLE_X64=1``.
 """
 
 import jax
@@ -35,6 +47,6 @@ def _assert_x64() -> None:
         raise RuntimeError(
             f"glomap_jax requires float64 but the JAX default dtype is {dtype}; "
             "do not disable jax_enable_x64 (check the JAX_ENABLE_X64 env var). "
-            "GLOMAP branches on thresholds down to 1e-40, which float32 cannot "
-            "represent."
+            "The reference is a double-precision Fortran build and the tolerance "
+            "policy gates at 1e-11 to 1e-13, which float32 cannot deliver."
         )

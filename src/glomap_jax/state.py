@@ -10,9 +10,14 @@ ratio times the gridbox air mass, not a concentration.
 Shapes. ``nmodes = 8`` and ``ncp_max = 10`` are Fortran PARAMETERs, so those
 extents are static. All seven supported mode setups resolve to ``ncp = 6``; the
 ``ncp = 9/10`` setups are rejected by the box driver. What genuinely varies per
-setup is ``nchemg`` (0, 9, 11), ``nadvg`` (2, 11, 13) and ``nbudaer`` (eight
-distinct values from 8 to 138), so those are padded to their maxima and masked,
-which lets a single compiled kernel serve every configuration.
+setup is ``nchemg`` (0, 9, 11), ``nadvg`` (2, 11, 13) and ``nbudaer`` (**seven**
+distinct values: 8, 46, 89, 104, 107, 123, 138), so those are padded to their
+maxima and masked, which lets a single compiled kernel serve every configuration.
+
+Note ``s0g`` and ``s0g_dot`` live in **different index spaces**, which is easy to
+miss because they are declared adjacently upstream. ``s0g`` is sized ``nadvg``
+(advected tracers) and ``s0g_dot`` is sized ``nchemg`` (chemistry tracers), with
+``nadvg = 2 + nchemg``.
 
 Mode index order is fixed regardless of setup:
 ``0 nuc-sol, 1 ait-sol, 2 acc-sol, 3 cor-sol, 4 ait-ins, 5 acc-ins,
@@ -34,7 +39,13 @@ NCP_MAX = 10
 # nchemgmax, a PARAMETER in ukca_setup_indices.F90. condensable/mm_gas/dimen are
 # already dimensioned to it upstream, so padding here is safe.
 NCHEMG_MAX = 50
-# Largest nbudaer across the seven supported setups (sussbcocdu_7mode).
+# s0g is indexed in the ADVECTED-tracer space, not the chemistry space:
+# ukca_aero_step.F90:453 declares s0g(nbox, nadvg), and nadvg = 2 + nchemg
+# (ukca_setup_indices.F90:647). Sizing it by NCHEMG_MAX happens to be large
+# enough today (max nadvg = 13) but is the wrong axis and would break silently.
+NADVG_MAX = 2 + NCHEMG_MAX
+# Largest nbudaer across the seven supported setups (sussbcocdu_7mode). The
+# seven values are 8, 46, 89, 104, 107, 123, 138.
 NBUDAER_MAX = 138
 
 # Mode indices (0-based; Fortran is 1-based).
@@ -98,7 +109,7 @@ class GasState(NamedTuple):
     consistently. Do not apply it here.
     """
 
-    s0g: jnp.ndarray  # (nbox, NCHEMG_MAX) vmr * gridbox air mass [kg]
+    s0g: jnp.ndarray  # (nbox, NADVG_MAX)  vmr * gridbox air mass [kg]
     s0g_dot: jnp.ndarray  # (nbox, NCHEMG_MAX) chemical tendency [vmr s-1]
 
 

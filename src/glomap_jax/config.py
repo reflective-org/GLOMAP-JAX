@@ -94,6 +94,22 @@ class ModelConfig:
             )
         if self.i_nuc_method not in (2, 3):
             raise ValueError(f"i_nuc_method={self.i_nuc_method} must be 2 or 3")
+        # The same ereport cited above for i_nuc_method also covers ibln
+        # (ukca_calcnucrate.F90:280-281), which an earlier version left
+        # unvalidated -- ModelConfig(ibln=99) constructed happily.
+        if self.ibln not in (1, 2, 3):
+            raise ValueError(f"ibln={self.ibln} must be 1, 2 or 3")
+        if self.icondiam not in (1, 2):
+            raise ValueError(
+                f"icondiam={self.icondiam} must be 1 or 2; "
+                "ukca_conden.F90:279-283 ereports on CASE DEFAULT"
+            )
+        if self.imerge not in (1, 2, 3):
+            raise ValueError(f"imerge={self.imerge} must be 1, 2 or 3")
+        if self.ifuchs not in (1, 2):
+            raise ValueError(f"ifuchs={self.ifuchs} must be 1 or 2")
+        if self.idcmfp not in (1, 2):
+            raise ValueError(f"idcmfp={self.idcmfp} must be 1 or 2")
         if self.nmts < 1 or self.nzts < 1:
             raise ValueError("nmts and nzts must be >= 1")
 
@@ -141,6 +157,14 @@ class FidelityConfig:
     # necessarily better-defined than the reference, and no Fortran golden can
     # exist for that combination until UP-6 is fixed upstream.
     s_cond_s_zero_when_cond_off: bool = True
+
+    # UP-10, found in the phase A review. ukca_conden.F90:372-387 gates
+    # insoluble-mode condensation with num_eps indexed by the enclosing SOLUBLE
+    # mode rather than the insoluble mode being tested. num_eps spans twelve
+    # orders of magnitude across modes, so imode=mode_cor_sol (1e-14) gates
+    # mode_sup_insol (1e-20) -- wrong by 1e6. Changes results on i_mode_setup=8,
+    # the only supported setup with mode_sup_insol active.
+    conden_insol_num_eps_by_sol_mode: bool = True
 
     # Not a defect: ukca_calc_drydiam.F90:245-262 silently rewrites md/mdt for
     # modes 1-3 (nuc/ait/acc soluble only, NOT all eight) whose diameter falls

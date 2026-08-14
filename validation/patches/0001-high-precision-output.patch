@@ -1,0 +1,57 @@
+Bump CSV output from ES14.6 to ES24.16.
+
+`ES14.6` carries seven significant digits. That is ample for the shipped box
+model's own invariant tests (`sum_constant M_ 1e-6`) and for measuring the
+single-vs-double precision floor at 3.7e-4, but it is four to nine orders of
+magnitude short of the tolerances the JAX port must be gated at:
+`RTOL_STEP = 1e-11`, `RTOL_ALGEBRAIC = 1e-13`, `RTOL_JIT_VS_EAGER = 1e-14`.
+
+Without this, a `-fdefault-real-8` reference truncated to seven digits is worth
+no more than the single-precision one, and Gate C cannot be met at any useful
+tolerance.
+
+Applied to a staged copy of the tree at build time; `fortran/` itself is never
+modified. `src/box/` is new BSD-3 code, not Crown Copyright, so this is a
+permitted extension rather than a divergence from UKCA.
+
+--- a/src/box/glomap_box_output_mod.F90
++++ b/src/box/glomap_box_output_mod.F90
+@@ -81,26 +81,26 @@
+ REAL :: mass_ugm3, h2so4_c, secorg_c
+
+-WRITE(row,'(ES14.6,",",ES14.6)') time_s, time_s / 3600.0
++WRITE(row,'(ES24.16,",",ES24.16)') time_s, time_s / 3600.0
+
+ DO imode = 1, nmodes
+   IF (.NOT. glomap_variables%mode(imode)) CYCLE
+-  WRITE(fld,'(",",ES14.6)') st%nd(1,imode)          ; row = TRIM(row)//fld
+-  WRITE(fld,'(",",ES14.6)') st%drydp(1,imode)*1.0e9 ; row = TRIM(row)//fld
+-  WRITE(fld,'(",",ES14.6)') st%wetdp(1,imode)*1.0e9 ; row = TRIM(row)//fld
+-  WRITE(fld,'(",",ES14.6)') st%rhopar(1,imode)      ; row = TRIM(row)//fld
++  WRITE(fld,'(",",ES24.16)') st%nd(1,imode)          ; row = TRIM(row)//fld
++  WRITE(fld,'(",",ES24.16)') st%drydp(1,imode)*1.0e9 ; row = TRIM(row)//fld
++  WRITE(fld,'(",",ES24.16)') st%wetdp(1,imode)*1.0e9 ; row = TRIM(row)//fld
++  WRITE(fld,'(",",ES24.16)') st%rhopar(1,imode)      ; row = TRIM(row)//fld
+ END DO
+
+ DO imode = 1, nmodes
+   IF (.NOT. glomap_variables%mode(imode)) CYCLE
+   DO icp = 1, glomap_variables%ncp
+     IF (.NOT. glomap_variables%component(imode,icp)) CYCLE
+     mass_ugm3 = st%md(1,imode,icp) * st%nd(1,imode) *                          &
+                 (glomap_variables%mm(icp) / avogadro) * 1.0e6 * 1.0e9
+-    WRITE(fld,'(",",ES14.6)') mass_ugm3 ; row = TRIM(row)//fld
++    WRITE(fld,'(",",ES24.16)') mass_ugm3 ; row = TRIM(row)//fld
+   END DO
+ END DO
+
+ h2so4_c  = 0.0
+ secorg_c = 0.0
+ IF (mh2so4  > 0) h2so4_c  = st%s0g(1,mh2so4)  / env%sm(1) * env%aird(1)
+ IF (msec_org > 0) secorg_c = st%s0g(1,msec_org) / env%sm(1) * env%aird(1)
+-WRITE(fld,'(",",ES14.6)') h2so4_c  ; row = TRIM(row)//fld
+-WRITE(fld,'(",",ES14.6)') secorg_c ; row = TRIM(row)//fld
++WRITE(fld,'(",",ES24.16)') h2so4_c  ; row = TRIM(row)//fld
++WRITE(fld,'(",",ES24.16)') secorg_c ; row = TRIM(row)//fld
+
+ WRITE(csv_unit,'(A)') TRIM(row)

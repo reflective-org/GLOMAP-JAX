@@ -83,7 +83,7 @@ def test_variant_builds_and_runs(built, tmp_path, variant):
     assert exe.is_file(), f"ref-{variant} produced no executable"
     out = tmp_path / f"bl_{variant}.csv"
     _run(exe, out, built / "namelists" / "boundary_layer.nml")
-    header, rows = _load(out)
+    _, rows = _load(out)
     assert len(rows) == 49, "expected 48 steps plus the initial state"
     assert all(v == v for r in rows for v in r), "non-finite value in reference output"
 

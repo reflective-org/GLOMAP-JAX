@@ -5,9 +5,16 @@ Every flag in `FidelityConfig` (`src/glomap_jax/config.py`) has a default that
 deference; it is the only way a trajectory comparison against the reference
 means anything.
 
-Each flag below is tested at both settings. `tests/test_fidelity_registry.py`
-fails if a flag exists without a section here, or a section exists without a
-flag — so this file cannot drift out of date silently.
+`tests/test_fidelity_registry.py` fails if a flag exists without a section here,
+or a section exists without a flag, so this file cannot drift out of date
+silently.
+
+**Both-settings tests do not exist yet.** They land with the phase that ports
+the routine each flag governs. Two of them will additionally need a `src/box/`
+overlay to produce a non-default reference at all: `l_fix_ukca_water_content`
+is hard-set in code rather than namelist-exposed
+(`glomap_box_config_mod.F90:322`), and `s_cond_s_zero_when_cond_off` has no
+Fortran counterpart by construction (see UP-6).
 
 Flipping a flag to the non-Fortran setting gives a model that is arguably more
 correct and definitely not GLOMAP. Do it deliberately, never to make a test
@@ -81,6 +88,28 @@ Vehkamäki guard fail and the BLN factor collapse to `exp(0) = 1`.
 **No Fortran golden can exist for that combination** until UP-6 is fixed, which
 is also why `glomap-box` ships `cond_only`, `coag_only` and `all_off` namelists
 but no `nucl_only`.
+
+## `conden_insol_num_eps_by_sol_mode`
+
+**Default `True` — reproduce the Fortran.** Upstream defect UP-10, found during
+the phase A adversarial review and absent from the original plan.
+
+`ukca_conden.F90:372-387` gates condensation onto each insoluble mode with
+`num_eps` indexed by the enclosing **soluble** mode:
+
+```fortran
+mask4i(:) = mask2(:) .AND. ( nd(:,mode_sup_insol) > num_eps(imode) )
+```
+
+`num_eps` spans twelve orders of magnitude across modes
+(`[1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]`), so with
+`imode = mode_cor_sol` the super-coarse insoluble mode is gated at `1e-14`
+instead of its own `1e-20` — wrong by a factor of 10⁶. Line 366 in the same
+routine uses `num_eps(imode)` correctly for `nd(:,imode)`, which is what makes
+this look like a copy-paste slip rather than intent.
+
+**Changes results on `i_mode_setup = 8`**, the only supported setup with
+`mode_sup_insol` active — and one the done-criteria require.
 
 ## `drydiam_undersize_reset`
 

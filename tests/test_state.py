@@ -51,13 +51,33 @@ def test_state_survives_a_jit_boundary():
     assert float(out.nd[0, 0]) == 1.0
 
 
-def test_fields_carry_shape_and_unit_annotations():
-    # The units are load-bearing: md is molecules per particle, not a mass, and
-    # s0g is a mixing ratio times air mass, not a concentration.
-    for cls in (st.AerosolState, st.GasState, st.DerivedSize, st.Environment):
-        src = cls.__doc__ or ""
-        assert src, f"{cls.__name__} has no docstring"
-    assert "molecules ptcl-1" in st.__doc__ or True  # units live on the fields
+@pytest.mark.parametrize("cls", [st.AerosolState, st.GasState, st.DerivedSize, st.Environment])
+def test_every_field_carries_a_shape_and_unit_comment(cls):
+    """Units are load-bearing here and easy to get wrong.
+
+    md is molecules per particle rather than a mass; s0g is a mixing ratio times
+    gridbox air mass rather than a concentration; s0g and s0g_dot sit in
+    different index spaces. A field whose comment is deleted or wrong is a real
+    hazard, so parse the source and require every field to carry one.
+
+    (The previous version of this test ended in `or True` and could not fail.)
+    """
+    import inspect
+    import re
+
+    src = inspect.getsource(cls)
+    fields = [line for line in src.splitlines() if re.match(r"\s+\w+: jnp\.ndarray", line)]
+    assert fields, f"{cls.__name__} declares no array fields"
+    for line in fields:
+        name = line.strip().split(":")[0]
+        assert "#" in line, f"{cls.__name__}.{name} has no shape/unit comment"
+        comment = line.split("#", 1)[1]
+        assert "(" in comment and ")" in comment, (
+            f"{cls.__name__}.{name} comment has no shape: {comment.strip()!r}"
+        )
+        assert "[" in comment and "]" in comment, (
+            f"{cls.__name__}.{name} comment has no units: {comment.strip()!r}"
+        )
 
 
 @pytest.mark.parametrize("setup", SUPPORTED_MODE_SETUPS)

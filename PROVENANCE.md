@@ -41,7 +41,9 @@ Two upstream defects, both verified to leave release-build results unchanged:
   fatal error with a bare `STOP`, which exits with status **0**, so every UKCA
   abort looked like success to the shell. Only reachable on the abort path.
 
-Both are reported upstream — see `docs/UPSTREAM_DEFECTS.md` and issue #1.
+Both are **drafted for upstream submission, not yet filed** — see
+`docs/UPSTREAM_DEFECTS.md` and issue #1. By decision, Reflective files
+upstream issues, not this repository.
 
 ## Refreshing against a newer UKCA
 
