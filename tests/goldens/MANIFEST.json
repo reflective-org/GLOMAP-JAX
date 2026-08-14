@@ -1507,6 +1507,171 @@
         "_rows": 49,
         "_variant": "f64"
       }
+    },
+    "numerics.f64.leaf.npz": {
+      "arrays": {
+        "_case": {
+          "dtype": "<U8",
+          "sha256": "083dc29a3e4adb116b66e2fec80d1acde731da7fcf542fcf976badaddbc8760d",
+          "shape": []
+        },
+        "_mode": {
+          "dtype": "<U4",
+          "sha256": "c453520ce3b78ff4e6209b12095e6183989236eadb170406b3dd1def9b7b2736",
+          "shape": []
+        },
+        "_rows": {
+          "dtype": "<i8",
+          "sha256": "c42052941111ef67fc00634dae0ed368e0774621b07bd5e9a1a60d0265915a1b",
+          "shape": []
+        },
+        "_variant": {
+          "dtype": "<U3",
+          "sha256": "77d0847b290613b8a7039ec6dfa08b87cc1621f5975c806c5a4b3d960d751935",
+          "shape": []
+        },
+        "cubrt_negative_x": {
+          "dtype": "<f8",
+          "sha256": "f30a7419ab9970a824252fb9cad86f74142b1ae41d9ccd438d15c488a0839961",
+          "shape": [
+            4
+          ]
+        },
+        "cubrt_negative_y": {
+          "dtype": "<f8",
+          "sha256": "1ed3118a4be409876b51f9bf3ebb8ce764ee0e6f104ba6fe5217d7661de24746",
+          "shape": [
+            4
+          ]
+        },
+        "cubrt_x": {
+          "dtype": "<f8",
+          "sha256": "fd7a8a81a2a8fa79ffb3809dff40b6c32fbaa42cfa0b378e667dbfb66ae93351",
+          "shape": [
+            1865
+          ]
+        },
+        "cubrt_y": {
+          "dtype": "<f8",
+          "sha256": "bfd5e7dee5d06badf8de787b384367e587ec8c3b2816321f837296691eb801c4",
+          "shape": [
+            1865
+          ]
+        },
+        "erf_x": {
+          "dtype": "<f8",
+          "sha256": "842d67314092de72ad19637d10c2b9f9f7824a536619661256074d4730a0d568",
+          "shape": [
+            4330
+          ]
+        },
+        "erf_y": {
+          "dtype": "<f8",
+          "sha256": "8e1257e9333ade815a190916c755bf969097f672f07044c34e7ebd1af4aa666a",
+          "shape": [
+            4330
+          ]
+        },
+        "exp_x": {
+          "dtype": "<f8",
+          "sha256": "dd4cecca821e5cbd62b458eecbfc36da08ff103e738043adc9a3bb1112690058",
+          "shape": [
+            3199
+          ]
+        },
+        "exp_y": {
+          "dtype": "<f8",
+          "sha256": "9ae66d41c4f8788d82a3afbe8afc9f0547e1e61c10ef73ffef6a52320bba43d2",
+          "shape": [
+            3199
+          ]
+        },
+        "log_x": {
+          "dtype": "<f8",
+          "sha256": "b71b8c2f1a8a9d6e9fb94b0c03a4f6a35a61a9dd76847ff68f42e4f3f131ed4b",
+          "shape": [
+            2463
+          ]
+        },
+        "log_y": {
+          "dtype": "<f8",
+          "sha256": "bddedd8dc9f5c754399bd0cdc907a994bda2a532556b4a896caaf36a9b317f49",
+          "shape": [
+            2463
+          ]
+        },
+        "nint_x": {
+          "dtype": "<f8",
+          "sha256": "5dd3a0713bcf78c35b4a14db1ce3bc575c4dc840634caf7a6f02579c844e00e3",
+          "shape": [
+            642
+          ]
+        },
+        "nint_y": {
+          "dtype": "<f8",
+          "sha256": "440bb943d216cfe0427a0a2d973141d185519c2b835778d106ba2a44e4861578",
+          "shape": [
+            642
+          ]
+        },
+        "oneover_x": {
+          "dtype": "<f8",
+          "sha256": "d38e099a82aa3561bc8b2dbf5552851278f154184e43561dc3ab44d7ed2dede9",
+          "shape": [
+            2402
+          ]
+        },
+        "oneover_y": {
+          "dtype": "<f8",
+          "sha256": "d9104f2c218b1f50159c15c784c35f453922a53e25e6b16c2a915d0e6e5daee9",
+          "shape": [
+            2402
+          ]
+        },
+        "pow_exponents": {
+          "dtype": "<f8",
+          "sha256": "dcfdc9a606f54fe6bf7e34d8c082551b158a99bb8dcfea059c95b3b24d85f968",
+          "shape": [
+            5
+          ]
+        },
+        "pow_x": {
+          "dtype": "<f8",
+          "sha256": "bbbf7792e3a7bcb92e043c5c89149b595370b4c01be0dcbd83306e0ecd4d3a24",
+          "shape": [
+            1865
+          ]
+        },
+        "pow_y": {
+          "dtype": "<f8",
+          "sha256": "ecd92900ad2df44b2d911ba80d1a9477156a3e3140818a26978ae9161aa17913",
+          "shape": [
+            5,
+            1865
+          ]
+        },
+        "vapour_round_x": {
+          "dtype": "<f8",
+          "sha256": "4b721abaed162a607e16f5fd1ab9f6dcb287954b1243c6967218095f12c60859",
+          "shape": [
+            481
+          ]
+        },
+        "vapour_round_y": {
+          "dtype": "<f8",
+          "sha256": "8ff47d5f31fc25f5fddef4ec52d04096eb7dd4990de7c0f26c4deec3398f1c8e",
+          "shape": [
+            481
+          ]
+        }
+      },
+      "content_sha256": "75cc7d4d0bd2549b96cbbc5da292cf5c8876077fe3eecddd19d7c49adb41979a",
+      "provenance": {
+        "_case": "numerics",
+        "_mode": "leaf",
+        "_rows": 17251,
+        "_variant": "f64"
+      }
     }
   },
   "toolchain": {

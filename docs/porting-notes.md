@@ -118,6 +118,61 @@ The remode entries are the sharpest gap: mode merging is the highest-variance
 part of the port, its mode loop is loop-carried, and no shipped case merges at
 all. It needs constructed fixtures **before** phase I, not after.
 
+## The transcendental compat layer, measured (task 21 → task 34)
+
+The plan called this the sleeper risk: an `erf` discrepancy becomes a
+merge/no-merge flip in `ukca_remode`, and discovering it inside phase I costs a
+day. `validation/capture_leaf.py` sweeps each primitive through the Fortran
+itself over grids that land *on* each hazard, 15,382 points in total. Results,
+against JAX on the CPU backend in float64:
+
+| primitive | agreement | verdict |
+|---|---|---|
+| `erf` (via `umErf`) | **bit-identical**, 4330/4330 | the sleeper does not materialise; no shim needed |
+| `log`, `1/x` | bit-identical | safe |
+| `x ** (1.0/3.0)` | bit-identical | **this** is what `cubrt_v` computes |
+| `exp` | 456/3199 differ, max 2.1e-16 | one ulp; inside tolerance but real |
+| `np.cbrt` | 1756/1865 differ, max 1.3e-14 | **must not be used** |
+| `NINT` vs `round` | 64/642 differ | **must not use `jnp.round`** |
+
+Three rules follow, and all three are asserted in
+`tests/test_numerics_reference.py` so they cannot be quietly broken later.
+
+**Write the cube root as `x ** (1.0/3.0)`.** `cubrt_v` is literally that
+expression; it is not a cube-root function. `np.cbrt` disagrees on 94% of the
+grid by up to 1.3e-14 — a hundred times `RTOL_ALGEBRAIC` — and since `cubrt_v`
+produces `drydp`, which feeds remode's merge threshold and `calc_drydiam`'s
+undersize reset, that is branch-flipping rather than cosmetic. The two also
+disagree about negatives: `x ** (1.0/3.0)` is NaN, `np.cbrt` returns the real
+root. Unreachable today (`dvol >= 0` wherever `cubrt_v` is called), but it is
+the failure a `cbrt` port would produce the first time it wasn't.
+
+**Do not use `jnp.round`.** Fortran `NINT` rounds half away from zero; numpy
+and JAX round half to even. Every tie in the grid disagrees, and away from ties
+they agree exactly — so a targeted shim suffices. The live consumer is
+`ukca_vapour.F90:226`, `(NINT(wts/5))*5`, whose result *indexes a table*: at
+`wts ∈ {42.5, 52.5, 62.5, 72.5, 82.5, 92.5}` the naive version selects a
+different table entry, not a slightly different number.
+
+**`powr_v` takes a scalar exponent.** It raises a whole array to one power; it
+does not do elementwise pairs. An elementwise port would compile, run, and be a
+different routine.
+
+### A hazard the plan did not have: JAX flushes subnormals
+
+XLA flushes the *result of any arithmetic operation* to zero when it would be
+subnormal — eager and under `jit`, even for `x + 0.0`. gfortran and numpy
+compute it. A subnormal *constant* survives conversion untouched, which is what
+makes it easy to miss: the value is representable, it just cannot be produced.
+
+Latent rather than live — `num_eps` bottoms out at 1e-20 and
+`eps_d = eps_ab² = 1e-40`, both comfortably normal in float64 (they are not in
+float32, which is one more reason for ADR-001). Recorded because the failure it
+would cause is a zero where the reference has a small positive number, feeding a
+`> eps` comparison, which separates trajectories by O(1) and would present as a
+gate-0 disagreement with no arithmetic explanation. Issue #15; re-measure on
+CUDA at task 3.7, where denormal handling differs again.
+
 ## `ukca_calc_drydiam` runs five times per step, not four
 
 The splitting diagram lists four calls inside `ukca_aero_step`. The branch dump

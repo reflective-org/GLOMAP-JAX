@@ -51,7 +51,9 @@ docs:
 # docs/REFERENCE_BUILD.md.
 goldens:
 	./validation/build_reference.sh both
+	./validation/build_f2py.sh
 	$(PY) validation/capture_reference.py
+	$(PY) validation/capture_leaf.py
 	$(PY) validation/goldens_manifest.py --write
 
 bench:

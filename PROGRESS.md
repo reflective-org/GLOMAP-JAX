@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (14/18)**
+## Phase B — reference harness: **in progress (15/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -58,7 +58,8 @@ Fixed in `3dd6b0f`:
 | 17 | Golden manifest drift/orphan gate | `76c87a6` |
 | 18 | Fixture size / Git-LFS ADR | `77f9f5d` |
 | 19 | Commit the reference fixtures | `687d0b3` |
-| 20 | f2py wrapper + in-process binding | this commit |
+| 20 | f2py wrapper + in-process binding | `1d060b8` |
+| 21 | Leaf reference-driver pattern + numerics driver | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -106,6 +107,17 @@ overlays really are instrumentation and not science. The meson/ninja blocker is
 gone; all four of the plan's f2py blockers turned out to be real and are
 documented in `docs/REFERENCE_BUILD.md`.
 
+**The sleeper risk is dead (task 21).** The numerics leaf sweep — 15,382 points
+through the Fortran itself — finds `erf` **bit-identical** between gfortran and
+JAX, so the merge/no-merge flip the plan feared in `ukca_remode` cannot happen
+via erf. `log` and `1/x` are bit-identical too; `exp` differs by one ulp on 14%
+of points, inside tolerance. Task 34 shrinks to three specific rules, all now
+asserted: write the cube root as `x ** (1.0/3.0)` (`np.cbrt` disagrees on 94% of
+the grid by up to 1.3e-14), never use `jnp.round` (every `NINT` tie disagrees,
+and the live consumer indexes a lookup table), and `powr_v` takes a scalar
+exponent. Plus one hazard the plan did not have: **XLA flushes subnormal
+arithmetic results to zero** while gfortran does not (issue #15, latent).
+
 **Fixture size (task 16, and most of task 18's answer).** The complete golden
 set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.80 MB** as
 compressed `.npz`, against roughly 70 MB of CSV from the reference. The state
@@ -128,7 +140,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 21-23 and 20b.
+Remaining: 22, 23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 

@@ -34,6 +34,8 @@ import goldens_manifest as gm  # noqa: E402
 
 CASES = ["bl_nmts3", "boundary_layer", "free_troposphere", "marine_bcoc"]
 MODES = ["trajectory", "budgets", "state", "branches"]
+# Leaf sweeps (task 21): not per-case, and not produced by the box binary.
+LEAF_ARCHIVES = {"numerics.f64.leaf.npz"}
 
 # Task 13. The floor is a property of the trajectory over 48 steps of 1800 s.
 PRECISION_FLOOR = 3.7e-4
@@ -50,6 +52,7 @@ def test_the_expected_archives_are_committed():
     would notice, because the tests that use a fixture skip when it is absent."""
     expected = {f"{c}.f64.{m}.npz" for c in CASES for m in MODES}
     expected |= {f"{c}.f32.trajectory.npz" for c in CASES}
+    expected |= LEAF_ARCHIVES
     assert {p.name for p in GOLDENS.glob("*.npz")} == expected
 
 
