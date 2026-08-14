@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (10/18)**
+## Phase B — reference harness: **in progress (11/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -54,7 +54,8 @@ Fixed in `3dd6b0f`:
 | 14 | `--dump-budgets` overlay | `474af8f` |
 | 15 | Per-process state-snapshot overlay | `888922b` |
 | 15b | Branch-mask dump overlay (gate 0) | `06d5699` |
-| 16 | `capture_reference.py` with `--mode` dispatch | this commit |
+| 16 | `capture_reference.py` with `--mode` dispatch | `16dcb0f` |
+| 17 | Golden manifest drift/orphan gate | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -102,7 +103,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 17-23 and 20b.
+Remaining: 18-23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 

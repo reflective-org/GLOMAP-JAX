@@ -104,6 +104,41 @@ roughly 90× smaller than the CSV the reference emits, mostly because the state
 dump's 318k rows per case compress to ~0.15 MB once the labels are codes. Git
 LFS is not needed at this size (task 18 records the decision).
 
+## The drift / orphan gate
+
+```sh
+python validation/goldens_manifest.py --check    # exit 1 on any problem
+python validation/goldens_manifest.py --write    # re-bless, deliberately
+make goldens                                     # build + capture + write
+```
+
+`tests/goldens/MANIFEST.json` records every array's **name, dtype, shape and
+content hash**, the provenance keys the capture tool embeds, and the toolchain
+block from `TOOLCHAIN.txt` — which is a gitignored build product, so copying it
+into the manifest is the only way the committed goldens carry a record of what
+produced them. `tests/test_goldens_manifest.py` runs the check in CI.
+
+Three problems are reported separately, because they mean different things:
+
+| | meaning |
+|---|---|
+| `drift` | a listed archive's contents changed — investigate, do not re-bless |
+| `orphan` | an archive exists that nothing lists — captured and forgotten |
+| `missing` | a listed archive is gone — partial checkout, or a deleted fixture |
+
+Drift messages name *what* moved (`a.npz[values] values changed`,
+`a.npz[step] dtype <i4 -> <i8`, or a provenance change meaning the golden was
+regenerated from a different namelist), because "the hash changed" is not
+something anyone can act on.
+
+**Array contents are hashed, not the `.npz` file.** `np.savez_compressed` writes
+a zip and zip entries carry timestamps, so the same data written twice gives two
+different file hashes. A file-level hash would fail on every regeneration and be
+loosened away within a week.
+
+Capture does **not** update the manifest. Auto-blessing a capture would make the
+gate silent the one time it matters, so `--write` is always an explicit act.
+
 ## Reproducibility — read this before trusting a golden
 
 **Goldens are not portable across compilers or platforms.** Two reasons:

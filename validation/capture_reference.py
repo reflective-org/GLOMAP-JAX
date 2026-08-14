@@ -290,6 +290,9 @@ def main(argv: list[str] | None = None) -> int:
     for job in jobs:
         total += capture(job, args.out).stat().st_size
     print(f"total {total / 1e6:.2f} MB")
+    # Deliberately not automatic. Auto-blessing a capture would make the drift
+    # gate report nothing the one time it matters.
+    print("record them with: python validation/goldens_manifest.py --write")
     return 0
 
 

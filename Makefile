@@ -50,7 +50,9 @@ docs:
 # libm. So this target is deliberately never wired into CI -- see
 # docs/REFERENCE_BUILD.md.
 goldens:
-	$(PY) scripts/capture_reference.py --all
+	./validation/build_reference.sh both
+	$(PY) validation/capture_reference.py
+	$(PY) validation/goldens_manifest.py --write
 
 bench:
 	$(PY) benchmarks/bench_throughput.py
