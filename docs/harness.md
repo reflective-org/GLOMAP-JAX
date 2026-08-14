@@ -121,9 +121,34 @@ exist.
 * **It does not auto-bless a capture.** `goldens_manifest.py --write` is always
   an explicit act, because auto-blessing would make the drift gate silent the
   one time it matters.
-* **It does not yet survive `ereport`.** `STOP 1` in-process kills the
-  interpreter, at twenty reachable call sites. Subprocesses contain it; task 20b
-  fixes it.
+
+### The one deliberate divergence: the `ereport` shim
+
+Gate A links `validation/f2py/glomap_ereport_shim.F90` in place of
+`src/ukca/ereport_mod.F90`, **for the extension module only**. The real routine
+handles a fatal error with `STOP 1`, which is correct in an executable — it is
+what `fortran/patches/0002` exists to guarantee — and terminates the
+interpreter inside a Python extension, with no traceback and no way to say which
+of twenty reachable call sites fired. The shim records the call and returns.
+
+Three things keep that honest:
+
+1. **It never reaches the reference.** `build_reference.sh` does not mention it,
+   so no golden and no committed number is affected. Asserted by
+   `test_the_shim_is_not_linked_into_the_reference_build`, which also checks the
+   vendored `ereport` still contains `STOP 1`.
+2. **The binding checks for itself.** Letting a caller continue past a fatal
+   error is what makes the error visible — but the caller then computes
+   something, and that something looks like a number. Leaving the check to the
+   caller would convert a loud crash into a silent wrong answer, which is
+   strictly worse. So `wrap_init` and `wrap_step` record the shim's fatal count
+   before the call and return `ierr = 5` if it moved. This was not hypothetical:
+   before the check existed, `wrap_init` on a nonexistent namelist returned 0.
+3. **Every leaf driver must do the same.** Call `wrap_ereport_count()` after any
+   call that could reach an error path and discard the result if it is non-zero.
+
+This is what unblocks issue #13 — `ukca_solvecoagnucl_v`'s error branch (code 4)
+calls `ereport`, so it cannot be swept without the shim.
 
 ## Running it
 

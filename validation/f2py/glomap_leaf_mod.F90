@@ -149,3 +149,34 @@ DO i = 1, n
   y(i) = REAL((NINT(x(i) / 5)) * 5, KIND=8)
 END DO
 END SUBROUTINE leaf_vapour_round
+
+! ---------------------------------------------------------------------------
+! ereport shim accessors (task 20b). The shim itself is
+! glomap_ereport_shim.F90, linked in place of src/ukca/ereport_mod.F90 for
+! this extension only; see docs/harness.md.
+!
+! ANY gate-A driver must call wrap_ereport_count after every call and discard
+! the result if it is non-zero. The shim lets a caller continue past a fatal
+! error so Python can see it, which means whatever the caller computed
+! afterwards is meaningless -- and looks like a number.
+! ---------------------------------------------------------------------------
+SUBROUTINE wrap_ereport_count(fatal, warning, info)
+USE ereport_mod, ONLY: ereport_shim_counts
+IMPLICIT NONE
+INTEGER, INTENT(OUT) :: fatal, warning, info
+CALL ereport_shim_counts(fatal, warning, info)
+END SUBROUTINE wrap_ereport_count
+
+SUBROUTINE wrap_ereport_last(status, routine, message)
+USE ereport_mod, ONLY: ereport_shim_last
+IMPLICIT NONE
+INTEGER,            INTENT(OUT) :: status
+CHARACTER(LEN=256), INTENT(OUT) :: routine, message
+CALL ereport_shim_last(status, routine, message)
+END SUBROUTINE wrap_ereport_last
+
+SUBROUTINE wrap_ereport_reset()
+USE ereport_mod, ONLY: ereport_shim_reset
+IMPLICIT NONE
+CALL ereport_shim_reset()
+END SUBROUTINE wrap_ereport_reset

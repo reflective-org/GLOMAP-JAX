@@ -68,6 +68,15 @@
 !       2  shape mismatch against the Fortran's own sizes
 !       3  unknown field name
 !       4  not initialised yet
+!       5  a fatal ereport fired during the call; the result is meaningless
+!
+!   On 5: the ereport shim (task 20b, glomap_ereport_shim.F90) lets a caller
+!   continue past a fatal error so Python can see it rather than inherit a
+!   STOP. That is only safe if somebody checks, and leaving the checking to the
+!   caller turns a loud crash into a silent wrong answer -- which is strictly
+!   worse. So the entry points that run Fortran check for themselves: they
+!   record the shim's fatal count before the call and return 5 if it moved.
+!   wrap_ereport_last() then says which routine and why.
 !
 ! ---------------------------------------------------------------------------
 SUBROUTINE wrap_init(namelist_path, ierr)
@@ -82,17 +91,29 @@ USE glomap_box_env_mod,    ONLY: set_box_env
 USE glomap_box_state_mod,  ONLY: allocate_state, init_state
 USE glomap_f2py_state,     ONLY: env, st, f2py_nbox, is_initialised,           &
                                  initialised_setup, must_restart
+USE ereport_mod,           ONLY: ereport_shim_counts
 
 IMPLICIT NONE
 CHARACTER(LEN=*), INTENT(IN)  :: namelist_path
 INTEGER,          INTENT(OUT) :: ierr
+INTEGER :: fatal_before, fatal_after, warning, info
 
 IF (must_restart) THEN
   ierr = 1
   RETURN
 END IF
 
+CALL ereport_shim_counts(fatal_before, warning, info)
 CALL read_box_namelist(TRIM(namelist_path))
+
+! A failed namelist open reports through ereport, which the shim makes
+! non-fatal -- so without this check init would carry on into
+! init_ukca_for_box and report success against a configuration it never read.
+CALL ereport_shim_counts(fatal_after, warning, info)
+IF (fatal_after > fatal_before) THEN
+  ierr = 5
+  RETURN
+END IF
 
 IF (is_initialised) THEN
   IF (i_mode_setup /= initialised_setup) THEN
@@ -116,7 +137,9 @@ CALL set_box_env(env, f2py_nbox, temperature, pressure, rel_humid, spec_humid, &
 CALL allocate_state(st, f2py_nbox)
 CALL init_state(st, env, nd_init, dp_init, mfrac_init,                         &
                 h2so4_init, sec_org_init, h2so4_prod, sec_org_prod)
-ierr = 0
+
+CALL ereport_shim_counts(fatal_after, warning, info)
+ierr = MERGE(5, 0, fatal_after > fatal_before)
 
 END SUBROUTINE wrap_init
 
@@ -173,12 +196,14 @@ USE glomap_box_config_mod, ONLY: dt_chem, nmts, nzts, cond_on, nucl_on,        &
 USE glomap_box_state_mod,  ONLY: update_size
 USE glomap_f2py_state,     ONLY: env, st, f2py_nbox, is_initialised,           &
                                  must_restart
+USE ereport_mod,           ONLY: ereport_shim_counts
 
 IMPLICIT NONE
 INTEGER, INTENT(OUT) :: ierr
 REAL    :: zeros(f2py_nbox)
 INTEGER :: lday(f2py_nbox), jlabove(f2py_nbox), ilscat(f2py_nbox)
 REAL    :: dtz
+INTEGER :: fatal_before, fatal_after, warning, info
 
 IF (must_restart) THEN
   ierr = 1
@@ -188,6 +213,8 @@ IF (.NOT. is_initialised) THEN
   ierr = 4
   RETURN
 END IF
+
+CALL ereport_shim_counts(fatal_before, warning, info)
 
 zeros   = 0.0
 lday    = 1
@@ -226,7 +253,12 @@ CALL ukca_aero_step(                                                           &
 ! ukca_aero_step returns its own dry/wet sizes; refresh the diagnostic fields
 ! so the accessors report what the CSV output would have reported.
 CALL update_size(st, env)
-ierr = 0
+
+! ukca_aero_step has twenty reachable ereport sites, several of them inside the
+! substep loop. Without this the shim would turn a fatal into a plausible
+! trajectory.
+CALL ereport_shim_counts(fatal_after, warning, info)
+ierr = MERGE(5, 0, fatal_after > fatal_before)
 
 END SUBROUTINE wrap_step
 

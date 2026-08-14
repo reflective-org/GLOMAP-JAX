@@ -187,10 +187,13 @@ new switches paired with the old mode setup. Every entry point then returns 1
 until the process restarts. `tests/test_f2py_binding.py` runs each case in a
 subprocess accordingly.
 
-**Still outstanding (task 20b):** `ereport` does `STOP 1` in-process, with
-twenty reachable call sites. A subprocess turns that into a non-zero exit code
-rather than a dead interpreter, but driving the binding into an `ereport` path
-still loses the run.
+**The `ereport` shim.** `glomap_ereport_shim.F90` replaces
+`src/ukca/ereport_mod.F90` in this extension only, so a fatal error records
+itself and returns instead of stopping the interpreter. Same module name and
+signature, so already-compiled callers link against it unchanged. The reference
+build never sees it. `wrap_init` and `wrap_step` return `ierr = 5` if a fatal
+fired during the call — see `docs/harness.md` for why that check is not
+optional.
 
 ## Reproducibility — read this before trusting a golden
 

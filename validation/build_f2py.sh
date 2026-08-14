@@ -67,6 +67,17 @@ echo "==> 2/2  compiling the state module, then f2py on the wrapper only"
 gfortran $FCFLAGS -J "$FORTRAN/$BUILD" -I "$FORTRAN/$BUILD" \
          -c "$OUT/glomap_f2py_state_mod.F90" -o "$FORTRAN/$BUILD/glomap_f2py_state_mod.o"
 
+# The ereport shim REPLACES src/ukca/ereport_mod.o in this extension only.
+# The real one does STOP 1 on a fatal error, which inside a Python extension
+# terminates the interpreter with no traceback -- there are twenty reachable
+# call sites, so any driver aimed near an error path takes the test session
+# with it. Same module name and same signature, so every already-compiled
+# caller links against it unchanged; overwriting the object and the .mod in
+# place is enough. validation/build_reference.sh never sees this, so no golden
+# is affected. See docs/harness.md.
+gfortran $FCFLAGS -J "$FORTRAN/$BUILD" -I "$FORTRAN/$BUILD" \
+         -c "$OUT/glomap_ereport_shim.F90" -o "$FORTRAN/$BUILD/ereport_mod.o"
+
 # The program object carries a `main`, which would collide at link time.
 OBJECTS=$(ls "$FORTRAN/$BUILD"/*.o | grep -v '/glomap_box\.o$' | tr '\n' ' ')
 

@@ -15,9 +15,9 @@ setup is the only safe arrangement, and running the tests any other way would
 be testing a configuration that cannot exist. The helper below is the seed of
 task 20b's harness.
 
-`ereport` doing `STOP 1` in-process is the other half of 20b and is not yet
-handled. A subprocess turns that from "pytest dies with no traceback" into a
-non-zero exit code, which is a large part of why the tests are shaped this way.
+`ereport` doing `STOP 1` in-process is handled by the shim (task 20b), so a
+driver aimed at an error path no longer takes the session with it. The
+subprocess isolation stays regardless, for the setup constraint.
 """
 
 import json
@@ -72,6 +72,9 @@ def run_in_subprocess(body: str) -> dict:
 def test_the_extension_exposes_the_expected_entry_points():
     result = run_in_subprocess("result = sorted(n for n in dir(g) if n.startswith('wrap'))")
     assert result == [
+        "wrap_ereport_count",
+        "wrap_ereport_last",
+        "wrap_ereport_reset",
         "wrap_get_2d",
         "wrap_get_budgets",
         "wrap_get_md",
@@ -295,3 +298,99 @@ def test_each_setup_runs_in_its_own_process(namelist, setup, nbudaer):
         "nbudaer": nbudaer,
         "finite": True,
     }
+
+
+# --------------------------------------------------------------------------
+# The ereport shim (task 20b)
+# --------------------------------------------------------------------------
+
+
+@needs_binding
+def test_a_fatal_ereport_does_not_kill_the_interpreter():
+    """`ereport` handles a fatal error with `STOP 1`, which inside a Python
+    extension terminates the interpreter with no traceback. Twenty call sites
+    are reachable, so any driver aimed near an error path would take the whole
+    session with it.
+
+    A failed namelist open is the cheapest reachable one. Without the shim this
+    subprocess would exit 1 before printing anything."""
+    result = run_in_subprocess("""
+        before = [int(x) for x in g.wrap_ereport_count()]
+        ierr = g.wrap_init('/nonexistent/path.nml')
+        after = [int(x) for x in g.wrap_ereport_count()]
+        status, routine, message = g.wrap_ereport_last()
+        result = {'ierr': int(ierr), 'before': before, 'after': after,
+                  'status': int(status), 'routine': routine.decode().strip(),
+                  'message': message.decode().strip()}
+    """)
+    assert result["before"] == [0, 0, 0]
+    assert result["after"][0] == 1, "the fatal was not recorded"
+    assert result["status"] == 1
+    assert result["routine"] == "READ_BOX_NAMELIST"
+    assert "cannot open namelist file" in result["message"]
+
+
+@needs_binding
+def test_a_fatal_ereport_is_reported_as_an_error_not_as_success():
+    """The trap the shim creates, closed.
+
+    Letting a caller continue past a fatal error is what lets Python see it —
+    but the caller then computes something, and that something looks like a
+    number. Left to the caller to check, the shim would convert a loud crash
+    into a silent wrong answer, which is strictly worse.
+
+    So the entry points that run Fortran check the shim's fatal counter
+    themselves. Before this test existed, `wrap_init` on a nonexistent namelist
+    returned 0."""
+    result = run_in_subprocess("""
+        bad = g.wrap_init('/nonexistent/path.nml')
+        g.wrap_ereport_reset()
+        good = g.wrap_init(NAMELISTS + '/marine_bcoc.nml')
+        stepped = g.wrap_step()
+        result = {'bad': int(bad), 'good': int(good), 'stepped': int(stepped),
+                  'fatal': int(g.wrap_ereport_count()[0])}
+    """)
+    assert result["bad"] == 5, "a failed init must report 5, not success"
+    assert result["good"] == 0
+    assert result["stepped"] == 0
+    assert result["fatal"] == 0, "a clean run must not record a fatal"
+
+
+@needs_binding
+def test_the_shim_counters_reset():
+    """Gate-A drivers reset between cases; a leaked count from a previous case
+    would condemn the next one."""
+    result = run_in_subprocess("""
+        g.wrap_init('/nonexistent/path.nml')
+        during = [int(x) for x in g.wrap_ereport_count()]
+        g.wrap_ereport_reset()
+        after = [int(x) for x in g.wrap_ereport_count()]
+        result = {'during': during, 'after': after}
+    """)
+    assert result["during"][0] == 1
+    assert result["after"] == [0, 0, 0]
+
+
+def test_the_shim_is_not_linked_into_the_reference_build():
+    """The load-bearing property of the whole substitution.
+
+    The shim is a deliberate divergence: a fatal error stops being fatal. That
+    is acceptable only because it reaches the f2py extension and nothing else.
+    If it ever leaked into `validation/build_reference.sh`, every golden would
+    have been produced by a binary that continues past errors — and
+    `fortran/patches/0002` exists precisely to make the reference exit
+    non-zero.
+
+    Carries no skip: it reads scripts and sources rather than running anything,
+    so it holds in CI where there is no gfortran."""
+    build_ref = (REPO / "validation" / "build_reference.sh").read_text(encoding="utf-8")
+    assert "ereport_shim" not in build_ref, (
+        "the ereport shim is referenced by build_reference.sh; goldens would be "
+        "produced by a binary that continues past fatal errors"
+    )
+    build_f2py = (REPO / "validation" / "build_f2py.sh").read_text(encoding="utf-8")
+    assert "glomap_ereport_shim.F90" in build_f2py, "the shim is not built at all"
+
+    vendored = (REPO / "fortran" / "src" / "ukca" / "ereport_mod.F90").read_text(encoding="utf-8")
+    assert "STOP 1" in vendored, "the vendored ereport no longer stops; see UP-8"
+    assert "ereport_shim_counts" not in vendored, "the shim leaked into the vendored tree"
