@@ -1,0 +1,57 @@
+! ---------------------------------------------------------------------------
+! Continental boundary layer: moderate pre-existing aerosol, sustained
+! H2SO4 production. Condensation dominates; nucleation is suppressed by the
+! condensation sink, which is the expected polluted-BL behaviour.
+! ---------------------------------------------------------------------------
+&box_run
+  run_name     = 'bl_nmts3'
+  nsteps       = 48
+  dt_chem      = 1800.0
+  nmts         = 3
+  nzts         = 5
+  output_every = 1
+  output_file  = 'out/bl_nmts3.csv'
+  verbose      = 0
+/
+
+&box_env
+  temperature = 288.0
+  pressure    = 1.0e5
+  rel_humid   = 0.60
+  spec_humid  = -1.0
+  height      = 500.0
+  pbl_height  = 1000.0
+  box_volume  = 1.0
+/
+
+&box_aerosol
+  i_mode_setup = 1
+  !          nucsol   aitsol   accsol   corsol  aitins accins corins supins
+  nd_init  =    0.0,  1000.0,   100.0,     1.0,   0.0,   0.0,   0.0,   0.0
+  dp_init  =   -1.0,  40.0e-9, 200.0e-9, 2.0e-6, -1.0,  -1.0,  -1.0,  -1.0
+/
+
+&box_gas
+  h2so4_init   = 5.0e6
+  h2so4_prod   = 5.0e4
+  sec_org_init = 0.0
+  sec_org_prod = 0.0
+/
+
+&box_process
+  cond_on      = 1
+  nucl_on      = 1
+  coag_on      = 1
+  bln_on       = 0
+  i_nuc_method = 2
+  ibln         = 1
+  icoag        = 1
+  imerge       = 1
+  ifuchs       = 1
+  idcmfp       = 1
+  icondiam     = 1
+  intraoff     = 0
+  interoff     = 0
+  checkmd_nd   = 0
+  act_dryr     = 37.5e-9
+/
