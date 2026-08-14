@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (12/18)**
+## Phase B — reference harness: **in progress (13/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -56,7 +56,8 @@ Fixed in `3dd6b0f`:
 | 15b | Branch-mask dump overlay (gate 0) | `06d5699` |
 | 16 | `capture_reference.py` with `--mode` dispatch | `16dcb0f` |
 | 17 | Golden manifest drift/orphan gate | `76c87a6` |
-| 18 | Fixture size / Git-LFS ADR | this commit |
+| 18 | Fixture size / Git-LFS ADR | `77f9f5d` |
+| 19 | Commit the reference fixtures | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -64,6 +65,17 @@ a float64 port and `ref-f64` is the only meaningful reference. It also
 independently confirms that gating a 24-hour trajectory at 1e-9 was never
 achievable. Now recorded in `docs/porting-notes.md`, which task 13's acceptance
 criterion asked for and which was missed at the time.
+
+**But 3.7e-4 is a setup-1 number, not a global one** (found at task 19, issue
+#14). Re-derived from the committed fixtures it is 3.7e-4 / 1.0e-3 / 2.9e-4 for
+the three `i_mode_setup = 1` cases and **0.80** for `marine_bcoc`, where ageing
+depletes the Aitken insoluble mode over four orders of magnitude and f32 loses
+the residual: `Ddry_aitins` collapses from 30 nm to 5.8 nm and `N_aitins` stops
+decaying and turns back upward. The branch dump shows this is cancellation and
+not a flipped predicate — only 60 of 107,664 branch records differ, all from
+step 45, while the trajectory diverges continuously from step 20. First use of
+gate 0 to *exclude* a branch explanation, which is worth as much as confirming
+one. The f64 reference is well behaved throughout, so the port is unaffected.
 
 **Gate 0 findings (task 15b).** The branch dump is the first instrumentation
 that says anything the trajectory cannot, and three results change later work:
@@ -106,7 +118,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 19-23 and 20b.
+Remaining: 20-23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 

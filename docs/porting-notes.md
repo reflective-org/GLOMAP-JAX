@@ -20,6 +20,31 @@ state.
 The floor is only interpretable **away from branch boundaries**. Near any of the
 predicates below the f32/f64 gap is O(1), not 1e-4.
 
+### …and 3.7e-4 is a setup-1 number, not a global one
+
+Re-derived from the committed fixtures, the column-scaled f32-vs-f64 gap is
+3.7e-4 for `boundary_layer`, 1.0e-3 for `free_troposphere` and 2.9e-4 for
+`bl_nmts3` — all `i_mode_setup = 1`. For `marine_bcoc`, the only shipped case
+with an insoluble mode, it is **0.80**.
+
+Ageing depletes the Aitken insoluble mode over four orders of magnitude across
+the run. In f64, number and mass leave in proportion and the mean dry diameter
+stays pinned near 30 nm while the number decays to 2e-5 cm⁻³. In f32 the
+residual loses significance, mass leaves faster than number, `Ddry_aitins`
+collapses from 30 nm to 5.8 nm, and `N_aitins` stops decaying and turns back
+upward.
+
+**It is cancellation, not a flipped predicate**, and the branch dump is what
+makes that checkable rather than a hypothesis: of 107,664 branch records exactly
+60 differ between the variants, all `mask4` at `coag_insol_insol`, all from step
+45 onward — while the trajectory divergence is already visible at step 20 and is
+continuous. The flips are a late symptom of an already-diverged state.
+
+The f64 reference is well behaved throughout, so nothing here threatens the
+port; `ref-f32` is diagnostic only by ADR-001. What it does mean is that for a
+configuration with a depleting mode, the f32 run is not a slightly-worse version
+of the f64 run — it is a different trajectory. Issue #14.
+
 ## What the branch dump shows (gate 0)
 
 `validation/patches/0004-dump-branches.patch` records every predicate the
