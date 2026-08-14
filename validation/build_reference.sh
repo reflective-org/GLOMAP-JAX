@@ -53,6 +53,7 @@ stage_tree() {
 
   shopt -s nullglob
   for p in "$REPO"/validation/patches/*.patch; do
+    verify_additive_for_ukca "$p" || return 1
     if ! patch -d "$stage" -p1 --forward --silent < "$p"; then
       echo "ERROR: overlay failed to apply: $(basename "$p")" >&2
       return 1
@@ -60,12 +61,41 @@ stage_tree() {
   done
   shopt -u nullglob
 
-  # The overlays must not have touched UKCA science.
-  if ! diff -rq "$FORTRAN/src/ukca" "$stage/src/ukca" >/dev/null; then
-    echo "ERROR: an overlay modified src/ukca/, which is read-only." >&2
-    return 1
+  # Overlays may INSTRUMENT the UKCA science but never CHANGE it.
+  #
+  # Task 15 needs dump calls at 13 sites inside ukca_aero_step.F90, which lives
+  # under src/ukca/. Forbidding that outright would make per-process validation
+  # impossible; permitting arbitrary edits would let a "fix" slip into the
+  # reference and silently redefine every golden.
+  #
+  # The line the rule draws: a patch touching src/ukca/ may only ADD lines. Any
+  # removal means a science line was altered or deleted, which is a science
+  # change wearing instrumentation's clothes. Checked on the patch itself, so it
+  # holds regardless of what the patch claims about itself.
+  #
+  # src/box/ is new BSD-3 code and may be edited freely.
+  if ! diff -rq "$FORTRAN/src/ukca" "$stage/src/ukca" >/dev/null 2>&1; then
+    # NOTE: stderr, not stdout -- stage_tree echoes the stage path as its
+    # return value, so anything on stdout would be captured as part of it.
+    echo "    (src/ukca instrumented; patches verified additive)" >&2
   fi
   echo "$stage"
+}
+
+verify_additive_for_ukca() {
+  # Reject a patch that removes any line from a file under src/ukca/.
+  local patchfile="$1"
+  awk -v name="$(basename "$patchfile")" '
+    /^\+\+\+ / { in_ukca = ($2 ~ /src\/ukca\//) ; next }
+    in_ukca && /^-/ && !/^---/ {
+      printf "ERROR: %s removes a line from src/ukca/: %s\n", name, $0 > "/dev/stderr"
+      bad = 1
+    }
+    END { exit bad ? 1 : 0 }
+  ' "$patchfile" || {
+    echo "src/ukca/ may be instrumented (insertions only), never modified." >&2
+    return 1
+  }
 }
 
 build_variant() {

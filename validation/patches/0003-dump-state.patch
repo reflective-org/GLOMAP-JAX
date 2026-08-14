@@ -1,0 +1,302 @@
+Snapshot the aerosol state after each of the thirteen process calls.
+
+ukca_aero_step calls thirteen process routines per chemistry step. Comparing
+only the end state tells you THAT a port diverged; comparing after each call
+tells you WHERE. Budgets carry mass fluxes only -- no nd, no mdt, no drydp --
+so they cannot localise the failures that actually happen in coagulation and
+mode merging, which is why this exists alongside 0002 rather than instead of it.
+
+Records are long-format: one line per (step, site, imts, izts, field, mode,
+component, value) at ES24.16. Verbose, but it makes any diff attributable to a
+single array element.
+
+Instrumentation only. Every hunk touching src/ukca/ is an INSERTION -- the
+build script rejects any patch that removes a line from a UKCA file, because a
+removal is a science change wearing instrumentation's clothes. The dump module
+itself lives in src/box/ (new BSD-3 code) and deliberately has no USE
+statements, so calling it from src/ukca cannot create a dependency cycle with
+the box modules that already depend on UKCA.
+
+Controlled by state_file in &box_run; empty means not written.
+
+diff --color -ruN a/src/box/glomap_box.F90 b/src/box/glomap_box.F90
+--- a/src/box/glomap_box.F90	2026-08-13 18:52:00
++++ b/src/box/glomap_box.F90	2026-08-13 18:52:24
+@@ -35,11 +35,12 @@
+ USE glomap_box_config_mod,         ONLY: read_box_namelist, init_ukca_for_box,  &
+     run_name, nsteps, dt_chem, nmts, nzts, output_every, output_file, verbose,  &
+     temperature, pressure, rel_humid, spec_humid, height, pbl_height,           &
+-    budget_file, box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                     &
++    budget_file, state_file, box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                     &
+     h2so4_init, h2so4_prod, sec_org_init, sec_org_prod,                         &
+     cond_on, nucl_on, coag_on, bln_on, i_nuc_method, ibln, icoag, imerge,       &
+     ifuchs, idcmfp, icondiam, intraoff, interoff, iactmethod, checkmd_nd,       &
+     iextra_checks, act_dryr
++USE glomap_dump_mod,               ONLY: dump_start, dump_set_step, dump_finish
+ USE glomap_box_env_mod,            ONLY: box_env_type, set_box_env
+ USE glomap_box_state_mod,          ONLY: box_state_type, allocate_state,        &
+                                          init_state, update_size
+@@ -113,6 +114,7 @@
+ 
+ CALL open_output(TRIM(output_file))
+ CALL open_budgets(TRIM(budget_file))
++CALL dump_start(TRIM(state_file))
+ CALL write_header_table()
+ 
+ time_s = 0.0
+@@ -128,6 +130,7 @@
+   ! step; upstream ukca_aero_ctl resets both per call, so do the same.
+   st%bud_aer_mas = 0.0
+   st%n_merge     = 0
++  CALL dump_set_step(istep)
+ 
+   CALL ukca_aero_step(                                                         &
+     nbox, nchemg, nadvg, nbudaer,                                              &
+@@ -171,6 +174,7 @@
+ 
+ CALL close_output()
+ CALL close_budgets()
++CALL dump_finish()
+ 
+ WRITE(*,'(A)') '======================================================='
+ WRITE(*,'(A,I0,A,F8.1,A)') ' completed ', nsteps, ' steps of ', dt_chem, ' s'
+diff --color -ruN a/src/box/glomap_box_config_mod.F90 b/src/box/glomap_box_config_mod.F90
+--- a/src/box/glomap_box_config_mod.F90	2026-08-13 18:52:00
++++ b/src/box/glomap_box_config_mod.F90	2026-08-13 18:52:24
+@@ -42,6 +42,8 @@
+ CHARACTER(LEN=256),PUBLIC :: output_file = 'glomap_box.csv'
+ ! Per-process mass-flux dump. Empty => not written.
+ CHARACTER(LEN=256),PUBLIC :: budget_file = ''
++! Per-process state snapshot. Empty => not written.
++CHARACTER(LEN=256),PUBLIC :: state_file = ''
+ INTEGER,           PUBLIC :: verbose     = 0
+ 
+ ! ---------------------------------------------------------------------------
+@@ -141,7 +143,7 @@
+ CHARACTER(LEN=256) :: iomsg
+ 
+ NAMELIST /box_run/     run_name, nsteps, dt_chem, nmts, nzts,                  &
+-                       output_every, output_file, budget_file, verbose
++                       output_every, output_file, budget_file, state_file, verbose
+ NAMELIST /box_env/     temperature, pressure, rel_humid, spec_humid,           &
+                        height, pbl_height, box_volume
+ NAMELIST /box_aerosol/ i_mode_setup, nd_init, dp_init, mfrac_init,             &
+diff --color -ruN a/src/box/glomap_dump_mod.F90 b/src/box/glomap_dump_mod.F90
+--- a/src/box/glomap_dump_mod.F90	1969-12-31 16:00:00
++++ b/src/box/glomap_dump_mod.F90	2026-08-13 18:52:00
+@@ -0,0 +1,98 @@
++! *****************************COPYRIGHT*******************************
++! (c) 2026. Validation instrumentation for the GLOMAP-JAX port.
++! New code, BSD 3-Clause (see LICENCE). Not part of UKCA.
++! *****************************COPYRIGHT*******************************
++!
++! Description:
++!   Per-process state snapshots, for validating the JAX port routine by routine.
++!
++!   ukca_aero_step calls thirteen process routines per chemistry step. Comparing
++!   only the end state tells you THAT a port diverged; comparing after each call
++!   tells you WHERE. Budgets (bud_aer_mas) carry mass fluxes only -- no number
++!   concentration, no diameters -- so they cannot localise the failures that
++!   actually happen in coagulation and mode merging.
++!
++!   This module deliberately has NO `USE` statements. It is compiled into
++!   src/box but called from src/ukca, and a dependency in that direction would
++!   create a USE cycle with the box modules that already depend on UKCA. Taking
++!   plain arrays keeps the dependency graph acyclic.
++!
++!   Writes one record per call: a text tag, the (imts, izts) substep counters,
++!   and the state at full double precision.
++!
++MODULE glomap_dump_mod
++
++IMPLICIT NONE
++PRIVATE
++
++INTEGER, SAVE :: dump_unit = -1
++LOGICAL, SAVE :: dump_open = .FALSE.
++INTEGER, SAVE :: dump_step = 0
++
++PUBLIC :: dump_start, dump_set_step, dump_state, dump_finish
++
++CONTAINS
++
++SUBROUTINE dump_start(filename)
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: filename
++IF (LEN_TRIM(filename) == 0) RETURN
++OPEN(NEWUNIT=dump_unit, FILE=filename, STATUS='REPLACE', ACTION='WRITE')
++! OPEN(NEWUNIT=) returns a NEGATIVE unit, so openness is tracked explicitly
++! rather than by the sign of the unit number.
++dump_open = .TRUE.
++WRITE(dump_unit,'(A)') 'step,site,imts,izts,field,imode,icp,value'
++END SUBROUTINE dump_start
++
++SUBROUTINE dump_set_step(istep)
++IMPLICIT NONE
++INTEGER, INTENT(IN) :: istep
++dump_step = istep
++END SUBROUTINE dump_set_step
++
++SUBROUTINE dump_state(site, imts, izts, nbox, nmodes, ncp, nd, mdt, md, drydp,  &
++                      wetdp, mdwat, rhopar)
++! Long-format records: one line per (field, mode, component). Verbose, but it
++! makes a diff trivially attributable to a single array element, which is the
++! entire point of the exercise.
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: site
++INTEGER, INTENT(IN) :: imts, izts, nbox, nmodes, ncp
++REAL,    INTENT(IN) :: nd(nbox,nmodes), mdt(nbox,nmodes)
++REAL,    INTENT(IN) :: md(nbox,nmodes,ncp)
++REAL,    INTENT(IN) :: drydp(nbox,nmodes), wetdp(nbox,nmodes)
++REAL,    INTENT(IN) :: mdwat(nbox,nmodes), rhopar(nbox,nmodes)
++INTEGER :: imode, icp
++
++IF (.NOT. dump_open) RETURN
++
++DO imode = 1, nmodes
++  CALL emit(site, imts, izts, 'nd',     imode, 0, nd(1,imode))
++  CALL emit(site, imts, izts, 'mdt',    imode, 0, mdt(1,imode))
++  CALL emit(site, imts, izts, 'drydp',  imode, 0, drydp(1,imode))
++  CALL emit(site, imts, izts, 'wetdp',  imode, 0, wetdp(1,imode))
++  CALL emit(site, imts, izts, 'mdwat',  imode, 0, mdwat(1,imode))
++  CALL emit(site, imts, izts, 'rhopar', imode, 0, rhopar(1,imode))
++  DO icp = 1, ncp
++    CALL emit(site, imts, izts, 'md', imode, icp, md(1,imode,icp))
++  END DO
++END DO
++
++END SUBROUTINE dump_state
++
++SUBROUTINE emit(site, imts, izts, field, imode, icp, value)
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: site, field
++INTEGER, INTENT(IN) :: imts, izts, imode, icp
++REAL,    INTENT(IN) :: value
++WRITE(dump_unit,'(I0,",",A,",",I0,",",I0,",",A,",",I0,",",I0,",",ES24.16)')     &
++  dump_step, TRIM(site), imts, izts, TRIM(field), imode, icp, value
++END SUBROUTINE emit
++
++SUBROUTINE dump_finish()
++IMPLICIT NONE
++IF (dump_open) CLOSE(dump_unit)
++dump_open = .FALSE.
++END SUBROUTINE dump_finish
++
++END MODULE glomap_dump_mod
+diff --color -ruN a/src/ukca/ukca_aero_step.F90 b/src/ukca/ukca_aero_step.F90
+--- a/src/ukca/ukca_aero_step.F90	2026-08-13 18:52:00
++++ b/src/ukca/ukca_aero_step.F90	2026-08-13 18:52:24
+@@ -349,6 +349,8 @@
+     umPrint,                                                                   &
+     umMessage
+ 
++USE glomap_dump_mod,                         ONLY:                             &
++    dump_state
+ USE yomhook,                                 ONLY:                             &
+     lhook,                                                                     &
+     dr_hook
+@@ -540,10 +542,14 @@
+ !     Calculate dry diameter & volume for initial remode check
+ CALL ukca_calc_drydiam( nbox, glomap_variables,                                &
+                         nd, md, mdt, drydp, dvol )
++CALL dump_state('drydiam', 0, 0, nbox, nmodes, ncp,           &
++                nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ !
+ !     Initial remode call (check if advection taken DRYDP out of bounds)
+ CALL ukca_remode(nbox,nbudaer,nd,md,mdt,drydp,                                 &
+                  imerge,bud_aer_mas,n_merge_1d,pmid)
++CALL dump_state('remode', 0, 0, nbox, nmodes, ncp,           &
++                nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ 
+ !
+ IF (checkmd_nd == 1) THEN
+@@ -560,10 +566,14 @@
+ !     Recalculate dry and wet diameter and volume
+ CALL ukca_calc_drydiam( nbox, glomap_variables,                                &
+                         nd, md, mdt, drydp, dvol )
++CALL dump_state('drydiam', 0, 0, nbox, nmodes, ncp,           &
++                nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ !
+ CALL ukca_volume_mode(glomap_variables,nbox, nd,md,mdt,                        &
+                       RH_clr,dvol,drydp,t,pmid,s,                              &
+                       mdwat,wvol,wetdp,rhopar,pvol,pvol_wat)
++CALL dump_state('volume_mode', 0, 0, nbox, nmodes, ncp,           &
++                nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ !
+ !     Calculate impaction scavenging of aerosol (washout)
+ IF (imscav_on == 1) THEN
+@@ -926,6 +936,8 @@
+                          nd,tsqrt,rhoa,airdm3,dtz,wetdp,pmid,t,                &
+                          md,mdt,gc,bud_aer_mas,                                &
+                          delgc_cond,ageterm1,s_cond_s)
++        CALL dump_state('conden', imts, izts, nbox, nmodes, ncp,           &
++                        nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+         !
+         IF (verbose >= 2) THEN
+           WRITE(strizts,'(1i2.2)') izts
+@@ -1030,6 +1042,8 @@
+             CALL ukca_calcnucrate(nbox, dtz, t, s, rh, aird, h2so4,            &
+                                   delh2so4_nucl, sec_org, bln_on, ibln,        &
+                                   i_nuc_method, height, htpblg, s_cond_s)
++            CALL dump_state('calcnucrate', imts, izts, nbox, nmodes, ncp,           &
++                            nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+             !
+             mask(:)=(h2so4(:) > 0.0)
+             !
+@@ -1100,6 +1114,8 @@
+                              ageterm2,intraoff,interoff,                       &
+                              bud_aer_mas,kii_arr,kij_arr,                      &
+                              iextra_checks)
++      CALL dump_state('coagwithnucl', imts, izts, nbox, nmodes, ncp,           &
++                      nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ 
+       IF (checkmd_nd == 1) THEN
+         process='Done combined coag./nucleation'
+@@ -1128,6 +1144,8 @@
+     !       Apply ageing -- transfer ND,MD from insol. to sol. modes
+     CALL ukca_ageing(nbox, nchemg, nbudaer, nd, md, mdt, ageterm1, ageterm2,   &
+                      wetdp, bud_aer_mas)
++    CALL dump_state('ageing', imts, izts, nbox, nmodes, ncp,           &
++                    nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+     !
+     IF (checkmd_nd == 1) THEN
+       process='Done ageing of insoluble modes'
+@@ -1145,16 +1163,22 @@
+   !      Recalculate dry and wet diameter and volume
+   CALL ukca_calc_drydiam( nbox, glomap_variables,                              &
+                           nd, md, mdt, drydp, dvol )
++  CALL dump_state('drydiam', imts, 0, nbox, nmodes, ncp,           &
++                  nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+   !
+   CALL ukca_volume_mode(glomap_variables,nbox, nd,md,mdt,                      &
+                         RH_clr,dvol,drydp,t,pmid,s,                            &
+                         mdwat,wvol,wetdp,rhopar,pvol,pvol_wat)
++  CALL dump_state('volume_mode', imts, 0, nbox, nmodes, ncp,           &
++                  nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ 
+ 
+   !
+   !      Apply mode-merging where necessary
+   CALL ukca_remode(nbox,nbudaer,nd,md,mdt,drydp,                               &
+                    imerge,bud_aer_mas,n_merge_1d,pmid)
++  CALL dump_state('remode', imts, 0, nbox, nmodes, ncp,           &
++                  nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+   !
+   IF (checkmd_nd == 1) THEN
+     process='Done UKCA_REMODE              '
+@@ -1170,11 +1194,15 @@
+   ! Recalculate dry and wet diameter and volume after re-moding
+   CALL ukca_calc_drydiam( nbox, glomap_variables,                              &
+                           nd, md, mdt, drydp, dvol )
++  CALL dump_state('drydiam', imts, 0, nbox, nmodes, ncp,           &
++                  nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ 
+   !
+   CALL ukca_volume_mode(glomap_variables,nbox, nd,md,mdt,                      &
+                         RH_clr,dvol,drydp,t,pmid,s,                            &
+                         mdwat,wvol,wetdp,rhopar,pvol,pvol_wat)
++  CALL dump_state('volume_mode', imts, 0, nbox, nmodes, ncp,           &
++                  nd, mdt, md, drydp, wetdp, mdwat, rhopar)
+ 
+   IF (ichem == 1) THEN
+     !
