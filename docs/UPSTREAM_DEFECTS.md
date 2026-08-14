@@ -37,6 +37,14 @@ coagulation for the top insoluble modes, so `B ≡ 0`, `C ≡ 0` and the
 discriminant is exactly zero. Intra-modal number decays three times too fast. It
 never blows up (`A < 0`), which is why it survived. KGO-changing upstream.
 
+**Measured, not only argued.** The branch dump (task 15b) records which closed
+form each element takes. The factor-3 branch runs on **every substep of every
+shipped namelist**, including the default 4-mode `i_mode_setup = 1` — and for
+the top *soluble* mode, not only the insoluble ones this note originally named.
+`mode_cor_sol` has no larger soluble mode to coagulate with and no nucleation
+source, so `B` and `C` are exactly zero there too. Every supported configuration
+has a largest soluble mode, so every supported configuration hits this.
+
 ## UP-2 — header swaps arctan and log relative to the code
 
 `:60-68` assigns arctan to `D < 0` and the logarithmic form to `D > 0`; the code
@@ -52,7 +60,10 @@ only in `ageterm1`.
 ## UP-4 — `delgc_cond = delgc_cond/gc` where `= gc` was intended
 
 `ukca_conden.F90:353-354`. Unreachable: `delgc_cond = gc·(1−exp(−x))` at `:349`
-with `x ≥ 0` bounds it in `[0, gc]`.
+with `x ≥ 0` bounds it in `[0, gc]`. The branch dump carries the guard
+explicitly and it is false in every record of every shipped namelist, so this is
+an observation and not only an argument — which is why UP-4 gets an invariant
+test in the port rather than a fidelity flag.
 
 ## UP-5 — `icoag=4` reads unassigned `mfppi`/`mfppj`
 

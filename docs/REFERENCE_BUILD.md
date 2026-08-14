@@ -28,10 +28,17 @@ fortran/  --copy-->  .refstage/<variant>/  --apply validation/patches/*-->  buil
 
 This keeps `fortran/` byte-comparable with `glomap-box` and hash-checkable by
 `tests/test_vendored_tree.py`, while still allowing the instrumentation the
-harness needs. Only `src/box/` is ever patched — that is new BSD-3 code, not
-Crown Copyright UKCA. The staging step verifies `src/ukca/` is untouched in the
-stage as well, and the script verifies the working tree is unmodified before it
+harness needs. The script verifies the working tree is unmodified before it
 exits.
+
+`src/box/` is new BSD-3 code and overlays may edit it freely. `src/ukca/` is
+Crown Copyright UKCA, and per-process validation is impossible without reaching
+into it — the dumps at tasks 15 and 15b need hooks at call sites and inside the
+science routines themselves. The rule that keeps that safe is mechanical rather
+than declared: **an overlay touching `src/ukca/` may only ADD lines**, checked
+on the patch text itself so it holds regardless of what the patch claims about
+itself. A removal means a science line was altered or deleted, which is a
+science change wearing instrumentation's clothes, and the build rejects it.
 
 An overlay that fails to apply is a hard error, not a warning: a silently
 skipped overlay would produce a reference that looks right and is missing its
@@ -39,14 +46,35 @@ instrumentation.
 
 ## Overlays
 
-| patch | purpose |
-|---|---|
-| `0001-high-precision-output.patch` | `ES14.6` → `ES24.16` |
+Overlays are **ordered**. Each is generated against a stage with the earlier
+ones already applied, so a new one must be produced the same way or it will not
+apply.
 
-`ES14.6` carries 7 significant digits. The port is gated at `RTOL_STEP = 1e-11`
-and `RTOL_ALGEBRAIC = 1e-13`, so without this a double-precision reference is
-truncated at output to the same 7 digits as the single-precision one and Gate C
-cannot be met at any useful tolerance. With the overlay the reference carries 17.
+| patch | purpose | namelist key |
+|---|---|---|
+| `0001-high-precision-output.patch` | `ES14.6` → `ES24.16` | — |
+| `0002-dump-budgets.patch` | the 283 per-process mass fluxes in `bud_aer_mas` | `budget_file` |
+| `0003-dump-state.patch` | state snapshot after each of the 13 process calls | `state_file` |
+| `0004-dump-branches.patch` | the predicates the science branches on (gate 0) | `branch_file` |
+
+Each dump is written only when its key is set to a non-empty path in
+`&box_run`, so the reference binary is a single build regardless of which
+instrumentation a given run wants.
+
+On `0001`: `ES14.6` carries 7 significant digits. The port is gated at
+`RTOL_STEP = 1e-11` and `RTOL_ALGEBRAIC = 1e-13`, so without this a
+double-precision reference is truncated at output to the same 7 digits as the
+single-precision one and Gate C cannot be met at any useful tolerance. With the
+overlay the reference carries 17.
+
+On `0004`: this code diverges by flipped predicates, not by precision drift.
+About ten sites compare a computed float against a threshold and then select a
+*different closed form*, so a disagreement there is O(1) between two
+individually correct float64 implementations and no trajectory tolerance can
+attribute it. `branch_file` records, per box and per substep, which mask each
+site produced and — for `ukca_solvecoagnucl_v`, where the branch is a five-way
+select rather than a single test — an integer naming the form that ran. See
+`docs/porting-notes.md` for what the shipped fixtures do and do not reach.
 
 ## Reproducibility — read this before trusting a golden
 

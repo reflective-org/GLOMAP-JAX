@@ -41,19 +41,45 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (3/18)**
+## Phase B — reference harness: **in progress (9/18)**
 
 | # | Task | Commit |
 |---|---|---|
 | 11 | `ref-f32` build script + `fortran` marker | `4cd6690` |
 | 12 | `-fdefault-real-8` (`ref-f64`) variant | `4cd6690` |
 | 13 | Quantify the f32-vs-f64 precision floor | `4cd6690` |
+| 11b | High-precision output overlay (`ES24.16`) | `6377d23` |
+| 11c | Pinned toolchain, `-ffp-contract=off`, `TOOLCHAIN.txt` | `6377d23` |
+| 12b | `nmts > 1` case | `db0dfad` |
+| 14 | `--dump-budgets` overlay | `474af8f` |
+| 15 | Per-process state-snapshot overlay | `888922b` |
+| 15b | Branch-mask dump overlay (gate 0) | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
 a float64 port and `ref-f64` is the only meaningful reference. It also
 independently confirms that gating a 24-hour trajectory at 1e-9 was never
-achievable.
+achievable. Now recorded in `docs/porting-notes.md`, which task 13's acceptance
+criterion asked for and which was missed at the time.
+
+**Gate 0 findings (task 15b).** The branch dump is the first instrumentation
+that says anything the trajectory cannot, and three results change later work:
+
+* **UP-1 is more reachable than its write-up claimed.** The factor-3 branch
+  fires every substep of every shipped namelist, for the top *soluble* mode, in
+  the default 4-mode setup — not only for the insoluble modes. Its fidelity flag
+  must default to reproducing the defect.
+* **UP-4 is confirmed unreachable by observation**, not only by argument. It
+  gets an invariant test, not a flag.
+* **The shipped fixtures reach only 4 of `ukca_solvecoagnucl_v`'s 8 branch
+  codes**, and never reach the `MDCPNEW < 0` reset, the undersize diameter
+  reset, or any mode merge at all. Those cannot be validated from a trajectory
+  fixture and need constructed inputs — task 64 for coagulation, and an open gap
+  for remode ahead of phase I.
+
+Also found: `ukca_calc_drydiam` runs **five** times per chemistry step, not the
+four in the splitting diagram — `glomap_box_state_mod`'s `update_size` calls it
+once more from the driver.
 
 Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 20b. The additions came out of adversarial review:
@@ -67,7 +93,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 11b (high-precision dump, in progress), 11c, 12b, 14, 15, 15b, 16-23.
+Remaining: 16-23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 

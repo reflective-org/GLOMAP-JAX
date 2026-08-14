@@ -1,0 +1,709 @@
+Dump the predicates the science branches on (validation gate 0).
+
+GLOMAP-mode does not diverge by precision drift. It diverges by flipped
+predicates: about ten sites compare a computed float against a threshold and
+then select a different closed form. A flip there gives an O(1) difference
+between two individually correct float64 implementations, and no trajectory
+tolerance can attribute it -- the run simply lands somewhere else. Dumping the
+predicates themselves turns "the answer moved" into "this comparison went the
+other way, at this substep, in this mode".
+
+Instrumented sites:
+
+  ukca_solvecoagnucl_v  a per-element code naming WHICH of the five closed
+                        forms ran, plus the SQD*DTZ > 50 clamp and whether
+                        TAN's argument crossed pi/2
+  ukca_coagwithnucl     mask1 (both blocks), mask1a, mask2/mask4 for all three
+                        mode-pair loops, and the reset loop's MDCPNEW < 0 with
+                        mask1 before and after -- the in-place narrowing across
+                        ICP that a broadcast port would silently get wrong
+  ukca_conden           mask1, mask2 (both definitions), mask3/mask3i/mask4i,
+                        and the DELGC_COND > GC guard argued unreachable in
+                        UP-4, so the argument becomes an observation
+  ukca_remode           nmodemax_merge, the merge trigger, and the FRAC_N 0.5
+                        and FRAC_M 0.001 clamps that sit on an erf output
+  ukca_calc_drydiam     the ND > NUM_EPS mask and the undersize reset
+  ukca_calcnucrate      L1/L2, the Vehkamaki guard, and the three J > 1e-3
+                        gates that switch nucleation fully on or fully off
+  ukca_binapara         NTOT < 4 with T < 195.15, which replaces the computed
+                        rate with a flat 1e5
+
+Substep context comes from ukca_aero_step, the only routine that knows (imts,
+izts); leaf routines emit under it. That is why the module keeps context in
+SAVEd state rather than taking it as an argument -- ukca_solvecoagnucl_v, which
+owns the most valuable predicate in the file, cannot see the counters at all.
+
+Instrumentation only. Every hunk touching src/ukca/ is an INSERTION and reads
+only variables that are already live at that point; the build script rejects
+any patch that removes a line from a UKCA file. Verified by running the
+instrumented binary with and without branch_file set and against an
+uninstrumented build: all three trajectories are byte-identical.
+
+Controlled by branch_file in &box_run; empty means not written.
+
+diff --color -ruN a/src/box/glomap_box.F90 b/src/box/glomap_box.F90
+--- a/src/box/glomap_box.F90	2026-08-13 19:22:10
++++ b/src/box/glomap_box.F90	2026-08-13 19:24:16
+@@ -35,12 +35,14 @@
+ USE glomap_box_config_mod,         ONLY: read_box_namelist, init_ukca_for_box,  &
+     run_name, nsteps, dt_chem, nmts, nzts, output_every, output_file, verbose,  &
+     temperature, pressure, rel_humid, spec_humid, height, pbl_height,           &
+-    budget_file, state_file, box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                     &
++    budget_file, state_file, branch_file, box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                     &
+     h2so4_init, h2so4_prod, sec_org_init, sec_org_prod,                         &
+     cond_on, nucl_on, coag_on, bln_on, i_nuc_method, ibln, icoag, imerge,       &
+     ifuchs, idcmfp, icondiam, intraoff, interoff, iactmethod, checkmd_nd,       &
+     iextra_checks, act_dryr
+ USE glomap_dump_mod,               ONLY: dump_start, dump_set_step, dump_finish
++USE glomap_branch_mod,             ONLY: branch_start, branch_set_step,   &
++                                         branch_set_substep, branch_finish
+ USE glomap_box_env_mod,            ONLY: box_env_type, set_box_env
+ USE glomap_box_state_mod,          ONLY: box_state_type, allocate_state,        &
+                                          init_state, update_size
+@@ -115,6 +117,7 @@
+ CALL open_output(TRIM(output_file))
+ CALL open_budgets(TRIM(budget_file))
+ CALL dump_start(TRIM(state_file))
++CALL branch_start(TRIM(branch_file))
+ CALL write_header_table()
+ 
+ time_s = 0.0
+@@ -131,6 +134,7 @@
+   st%bud_aer_mas = 0.0
+   st%n_merge     = 0
+   CALL dump_set_step(istep)
++  CALL branch_set_step(istep)
+ 
+   CALL ukca_aero_step(                                                         &
+     nbox, nchemg, nadvg, nbudaer,                                              &
+@@ -161,6 +165,7 @@
+ 
+   ! ukca_aero_step returns updated MD/ND and its own dry/wet sizes; refresh
+   ! the diagnostic size and density fields so output is consistent.
++  CALL branch_set_substep(-1, -1)
+   CALL update_size(st, env)
+ 
+   time_s = REAL(istep) * dt_chem
+@@ -175,6 +180,7 @@
+ CALL close_output()
+ CALL close_budgets()
+ CALL dump_finish()
++CALL branch_finish()
+ 
+ WRITE(*,'(A)') '======================================================='
+ WRITE(*,'(A,I0,A,F8.1,A)') ' completed ', nsteps, ' steps of ', dt_chem, ' s'
+diff --color -ruN a/src/box/glomap_box_config_mod.F90 b/src/box/glomap_box_config_mod.F90
+--- a/src/box/glomap_box_config_mod.F90	2026-08-13 19:22:10
++++ b/src/box/glomap_box_config_mod.F90	2026-08-13 19:24:16
+@@ -44,6 +44,8 @@
+ CHARACTER(LEN=256),PUBLIC :: budget_file = ''
+ ! Per-process state snapshot. Empty => not written.
+ CHARACTER(LEN=256),PUBLIC :: state_file = ''
++! Per-substep predicate dump (validation gate 0). Empty => not written.
++CHARACTER(LEN=256),PUBLIC :: branch_file = ''
+ INTEGER,           PUBLIC :: verbose     = 0
+ 
+ ! ---------------------------------------------------------------------------
+@@ -143,7 +145,7 @@
+ CHARACTER(LEN=256) :: iomsg
+ 
+ NAMELIST /box_run/     run_name, nsteps, dt_chem, nmts, nzts,                  &
+-                       output_every, output_file, budget_file, state_file, verbose
++                       output_every, output_file, budget_file, state_file, branch_file, verbose
+ NAMELIST /box_env/     temperature, pressure, rel_humid, spec_humid,           &
+                        height, pbl_height, box_volume
+ NAMELIST /box_aerosol/ i_mode_setup, nd_init, dp_init, mfrac_init,             &
+diff --color -ruN a/src/box/glomap_branch_mod.F90 b/src/box/glomap_branch_mod.F90
+--- a/src/box/glomap_branch_mod.F90	1969-12-31 16:00:00
++++ b/src/box/glomap_branch_mod.F90	2026-08-13 19:24:16
+@@ -0,0 +1,135 @@
++! *****************************COPYRIGHT*******************************
++! (c) 2026. Validation instrumentation for the GLOMAP-JAX port.
++! New code, BSD 3-Clause (see LICENCE). Not part of UKCA.
++! *****************************COPYRIGHT*******************************
++!
++! Description:
++!   Branch-agreement dump (validation gate 0).
++!
++!   GLOMAP-mode does not diverge by precision drift. It diverges by flipped
++!   predicates: roughly ten sites compare a computed float against a threshold
++!   and then select a different closed form. A flip there gives an O(1)
++!   difference between two individually correct float64 implementations, and no
++!   trajectory tolerance can attribute it. Dumping the predicates themselves
++!   turns "the answer moved" into "this comparison went the other way".
++!
++!   Two kinds of record are emitted:
++!
++!     * masks   -- the boolean arrays the Fortran actually branches on,
++!                  as 0/1 per box;
++!     * codes   -- small integers naming WHICH closed form ran, where the
++!                  branch is a multi-way select rather than a single test.
++!                  ukca_solvecoagnucl_v is the case that matters: five forms
++!                  chosen on |A|, sign(D) and |B|, one of which is the
++!                  factor-3 defect (UP-1).
++!
++!   Context (step, substep, mode, component) is carried in module state rather
++!   than passed down, because the leaf routines that own the interesting
++!   predicates -- ukca_solvecoagnucl_v above all -- have no access to the
++!   substep counters. Callers set the context; leaves emit under it.
++!
++!   As with glomap_dump_mod, this module deliberately has NO `USE` statements.
++!   It is compiled into src/box but called from src/ukca, and a dependency in
++!   that direction would create a USE cycle with the box modules that already
++!   depend on UKCA. Taking plain integers keeps the graph acyclic, and taking
++!   INTEGER rather than LOGICAL sidesteps the several logical kinds
++!   (logical_32, log_small) the UKCA routines declare their masks with -- call
++!   sites convert with MERGE(1, 0, mask), which is kind-agnostic.
++!
++!   Controlled by branch_file in &box_run; empty means not written.
++!
++MODULE glomap_branch_mod
++
++IMPLICIT NONE
++PRIVATE
++
++INTEGER, SAVE :: br_unit = -1
++LOGICAL, SAVE :: br_open = .FALSE.
++INTEGER, SAVE :: br_step = 0
++INTEGER, SAVE :: br_imts = 0
++INTEGER, SAVE :: br_izts = 0
++INTEGER, SAVE :: br_i1   = 0
++INTEGER, SAVE :: br_i2   = 0
++CHARACTER(LEN=32), SAVE :: br_site = 'none'
++
++PUBLIC :: branch_start, branch_set_step, branch_set_substep, branch_ctx,       &
++          branch_mask, branch_one, branch_finish
++
++CONTAINS
++
++SUBROUTINE branch_start(filename)
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: filename
++IF (LEN_TRIM(filename) == 0) RETURN
++OPEN(NEWUNIT=br_unit, FILE=filename, STATUS='REPLACE', ACTION='WRITE')
++! OPEN(NEWUNIT=) returns a NEGATIVE unit, so openness is tracked explicitly
++! rather than by the sign of the unit number.
++br_open = .TRUE.
++WRITE(br_unit,'(A)') 'step,imts,izts,site,i1,i2,tag,ibox,value'
++END SUBROUTINE branch_start
++
++SUBROUTINE branch_set_step(istep)
++IMPLICIT NONE
++INTEGER, INTENT(IN) :: istep
++br_step = istep
++END SUBROUTINE branch_set_step
++
++SUBROUTINE branch_set_substep(imts, izts)
++! Called from ukca_aero_step, which is the only place that knows the substep
++! counters. Everything emitted afterwards is attributed to this substep.
++IMPLICIT NONE
++INTEGER, INTENT(IN) :: imts, izts
++br_imts = imts
++br_izts = izts
++END SUBROUTINE branch_set_substep
++
++SUBROUTINE branch_ctx(site, i1, i2)
++! site names the predicate group; i1/i2 are whatever pair of loop indices
++! disambiguates it -- usually (imode, jmode), (jv, imode) or (imode, icp).
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: site
++INTEGER, INTENT(IN) :: i1, i2
++br_site = site
++br_i1   = i1
++br_i2   = i2
++END SUBROUTINE branch_ctx
++
++SUBROUTINE branch_mask(tag, nv, value)
++! One record per box. Pass MERGE(1, 0, themask) at the call site.
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: tag
++INTEGER, INTENT(IN) :: nv
++INTEGER, INTENT(IN) :: value(nv)
++INTEGER :: i
++IF (.NOT. br_open) RETURN
++DO i = 1, nv
++  CALL emit(tag, i, value(i))
++END DO
++END SUBROUTINE branch_mask
++
++SUBROUTINE branch_one(tag, ibox, value)
++! Single-box form, for the predicates that live inside a scalar DO jl loop
++! (ukca_remode, ukca_calcnucrate, ukca_binapara).
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: tag
++INTEGER, INTENT(IN) :: ibox, value
++IF (.NOT. br_open) RETURN
++CALL emit(tag, ibox, value)
++END SUBROUTINE branch_one
++
++SUBROUTINE emit(tag, ibox, value)
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: tag
++INTEGER, INTENT(IN) :: ibox, value
++WRITE(br_unit,'(I0,",",I0,",",I0,",",A,",",I0,",",I0,",",A,",",I0,",",I0)')    &
++  br_step, br_imts, br_izts, TRIM(br_site), br_i1, br_i2, TRIM(tag),           &
++  ibox, value
++END SUBROUTINE emit
++
++SUBROUTINE branch_finish()
++IMPLICIT NONE
++IF (br_open) CLOSE(br_unit)
++br_open = .FALSE.
++END SUBROUTINE branch_finish
++
++END MODULE glomap_branch_mod
+diff --color -ruN a/src/ukca/ukca_aero_step.F90 b/src/ukca/ukca_aero_step.F90
+--- a/src/ukca/ukca_aero_step.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_aero_step.F90	2026-08-13 19:24:16
+@@ -351,6 +351,8 @@
+ 
+ USE glomap_dump_mod,                         ONLY:                             &
+     dump_state
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_set_substep
+ USE yomhook,                                 ONLY:                             &
+     lhook,                                                                     &
+     dr_hook
+@@ -539,6 +541,7 @@
+   CALL ukca_calcminmaxndmdt(nbox,nd,mdt,verbose)
+ END IF
+ !
++CALL branch_set_substep(0, 0)
+ !     Calculate dry diameter & volume for initial remode check
+ CALL ukca_calc_drydiam( nbox, glomap_variables,                                &
+                         nd, md, mdt, drydp, dvol )
+@@ -834,6 +837,7 @@
+ !
+ !     Loop over number of microphysics timesteps NMTS
+ DO imts=1,nmts
++  CALL branch_set_substep(imts, 0)
+   !
+   !     Calculate rate of condensation of gases onto existing particles
+   !     and nucleation rate
+@@ -886,6 +890,7 @@
+   END IF
+   !
+   DO izts=1,nzts
++    CALL branch_set_substep(imts, izts)
+     !
+     IF (verbose >= 2) THEN
+       WRITE(strizts,'(1i2.2)') izts
+@@ -1160,6 +1165,7 @@
+     !
+   END DO ! end loop over competition subsubtimesteps
+   !
++  CALL branch_set_substep(imts, 0)
+   !      Recalculate dry and wet diameter and volume
+   CALL ukca_calc_drydiam( nbox, glomap_variables,                              &
+                           nd, md, mdt, drydp, dvol )
+diff --color -ruN a/src/ukca/ukca_binapara_mod.F90 b/src/ukca/ukca_binapara_mod.F90
+--- a/src/ukca/ukca_binapara_mod.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_binapara_mod.F90	2026-08-13 19:24:16
+@@ -46,6 +46,7 @@
+ 
+ SUBROUTINE ukca_binapara(nbox,t_in,rh_in,h2so4_in,jveh,rc)
+ 
++USE glomap_branch_mod, ONLY: branch_ctx, branch_one
+ USE yomhook,  ONLY: lhook, dr_hook
+ USE parkind1, ONLY: jprb, jpim
+ USE ukca_um_legacy_mod, ONLY: exp_v, log_v
+@@ -251,6 +252,10 @@
+ jveh=jveh_out
+ rc=rc_out
+ DO jl=1,nbox
++
++  CALL branch_ctx('binapara', 0, 0)
++  CALL branch_one('ntot_lt_4', jl, MERGE(1, 0, ntot_out(jl) < 4.0))
++  CALL branch_one('t_lt_195', jl, MERGE(1, 0, t(jl) < 195.15))
+ 
+   IF (ntot_out(jl) < 4.0 ) THEN
+     IF ( t(jl) < 195.15) THEN
+diff --color -ruN a/src/ukca/ukca_calc_drydiam.F90 b/src/ukca/ukca_calc_drydiam.F90
+--- a/src/ukca/ukca_calc_drydiam.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_calc_drydiam.F90	2026-08-13 19:24:16
+@@ -116,6 +116,10 @@
+     mode_nuc_sol,                                                              &
+     mode_acc_sol
+ 
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_ctx,                                                                &
++    branch_mask,                                                               &
++    branch_one
+ USE yomhook,         ONLY: lhook, dr_hook
+ USE parkind1,        ONLY: jprb, jpim
+ USE ereport_mod,     ONLY: ereport
+@@ -235,6 +239,20 @@
+ !$OMP END PARALLEL DO
+ 
+ CALL cubrt_v(nmodes*nbox, ddpcub, drydp)
++
++DO imode=1,nmodes
++  IF (mode(imode)) THEN
++    CALL branch_ctx('drydiam', imode, 0)
++    DO jl=1,nbox
++      CALL branch_one('nd_gt_eps', jl,                                         &
++                      MERGE(1, 0, nd(jl,imode) > num_eps(imode)))
++      IF ((imode >= mode_nuc_sol) .AND. (imode <= mode_acc_sol)) THEN
++        CALL branch_one('undersize', jl,                                       &
++                        MERGE(1, 0, drydp(jl,imode) < ddplim0(imode)*0.1))
++      END IF
++    END DO
++  END IF
++END DO
+ 
+ ! .. also check whether mean diameter too low for mode
+ ! only do check for solvent modes nuc,ait,acc
+diff --color -ruN a/src/ukca/ukca_calcnucrate.F90 b/src/ukca/ukca_calcnucrate.F90
+--- a/src/ukca/ukca_calcnucrate.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_calcnucrate.F90	2026-08-13 19:24:16
+@@ -166,6 +166,10 @@
+ USE ukca_config_constants_mod, ONLY: boltzmann
+ USE ukca_constants,     ONLY: nmol, conc_eps
+ USE ukca_binapara_mod,  ONLY: ukca_binapara
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_ctx,                                                                &
++    branch_mask,                                                               &
++    branch_one
+ USE yomhook,            ONLY: lhook, dr_hook
+ USE parkind1,           ONLY: jprb, jpim
+ USE ereport_mod,        ONLY: ereport
+@@ -303,6 +307,9 @@
+     ! .. L1 is logical for using BHN when BLN is off or BLN is on
+     ! ..   and the box is above the height of the BL
+ 
++    CALL branch_ctx('nucrate', 0, 0)
++    CALL branch_one('l1', jl, MERGE(1, 0, l1))
++    CALL branch_one('l2', jl, MERGE(1, 0, l2))
+     IF (l1 .OR. l2) THEN ! include Kulmala in JRATE and DELH2SO4_NUCL
+ 
+       IF (i_bhn_method == i_bhn_method_kulmala) THEN
+@@ -340,6 +347,7 @@
+           jkul = EXP(theta)
+ 
+           !          Calculate new H2SO4
++          CALL branch_one('jkul_gt', jl, MERGE(1, 0, jkul > 1.0e-3))
+           IF (jkul > 1.0e-3) THEN
+             acons = (EXP(b2*d2+c2))*(1.0/ncrit)**a2
+             bcons = a2 + b2*e2
+@@ -360,6 +368,10 @@
+       ELSE IF (i_bhn_method == i_bhn_method_vekhamaki) THEN
+         !         Calculate H2SO4-H2O binary nucleation rate using Vehkamaki
+ 
++        CALL branch_one('veh_guard', jl,                                 &
++                        MERGE(1, 0, (h2so4(jl) > conc_eps) .AND.         &
++                              (jveh(jl) > 0.0) .AND.                     &
++                              (s_cond_s(jl) > 0.0) .AND. (rc(jl) > 0.0)))
+         IF ( (h2so4(jl) > conc_eps) .AND. (jveh(jl) > 0.0)                     &
+            .AND. (s_cond_s(jl) > 0.0) .AND. (rc(jl) > 0.0) ) THEN
+           !
+@@ -367,6 +379,7 @@
+                               s_cond_s(jl)/(1.0e6*h2so4(jl)*1.0e-13))
+           !
+           !          Calculate new H2SO4 and particle number density
++          CALL branch_one('japp_gt', jl, MERGE(1, 0, japp(jl) > 1.0e-3))
+           IF (japp(jl) > 1.0e-3) THEN
+             jrate(jl) = jrate(jl)+japp(jl)
+             !
+@@ -412,6 +425,8 @@
+         japp_bln = jbln*EXP(0.23*(1.0/3.0 - 1.0/dpbln)*                        &
+                    s_cond_s(jl)/(1.0e6*h2so4(jl)*1.0e-13))
+ 
++        CALL branch_one('japp_bln_gt', jl,                               &
++                        MERGE(1, 0, japp_bln > 1.0e-3))
+         IF (japp_bln > 1.0e-3) THEN
+           jrate(jl) = jrate(jl) + japp_bln
+           h2so4old2 = h2so4(jl)
+diff --color -ruN a/src/ukca/ukca_coagwithnucl.F90 b/src/ukca/ukca_coagwithnucl.F90
+--- a/src/ukca/ukca_coagwithnucl.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_coagwithnucl.F90	2026-08-13 19:24:16
+@@ -178,6 +178,10 @@
+          mh2so4
+ 
+ USE ukca_mode_check_artefacts_mod, ONLY: ukca_mode_check_mdt
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_ctx,                                                                &
++    branch_mask,                                                               &
++    branch_one
+ USE yomhook,          ONLY: lhook, dr_hook
+ USE parkind1,         ONLY: jprb, jpim
+ USE ukca_solvecoagnucl_v_mod, ONLY: ukca_solvecoagnucl_v
+@@ -296,6 +300,8 @@
+ 
+     ! Calculations are only done where NDOLD(:,IMODE) > NUM_EPS
+     mask1(:) =(ndold(:,imode) > num_eps(imode))
++    CALL branch_ctx('coag_sol', imode, 0)
++    CALL branch_mask('mask1', nbox, MERGE(1, 0, mask1(:)))
+ 
+     IF (intraoff /= 1) THEN
+       WHERE (mask1(:)) a(:)=-0.5*kii(:)
+@@ -319,6 +325,9 @@
+         END IF
+         xxx(:)=-bterm(:)*dtz
+         mask4(:)=ABS(xxx(:)) > xxx_eps
++        CALL branch_ctx('coag_sol_sol', imode, jmode)
++        CALL branch_mask('mask2', nbox, MERGE(1, 0, mask2(:)))
++        CALL branch_mask('mask4', nbox, MERGE(1, 0, mask4(:)))
+         ! .. above only evaluates exponential where it is "worth it"
+         ! .. (in cases where XXX is larger than specified tolerance XXX_EPS)
+         DO icp=1,ncp
+@@ -360,6 +369,9 @@
+         ! .. Also transfer number (include sol-ins term in B summation)
+         xxx(:)=-bterm(:)*dtz
+         mask4(:)=ABS(xxx(:)) > xxx_eps
++        CALL branch_ctx('coag_sol_insol', imode, jmode)
++        CALL branch_mask('mask2', nbox, MERGE(1, 0, mask2(:)))
++        CALL branch_mask('mask4', nbox, MERGE(1, 0, mask4(:)))
+         ! .. above only evaluates exponential where it is "worth it"
+         ! .. (in cases where XXX is larger than specified tolerance XXX_EPS).
+         DO icp=1,ncp
+@@ -394,6 +406,8 @@
+               ((imode == mode_nuc_sol) .AND. (delh2so4_nucl(:) > conc_eps))
+ 
+     ndold_v(:)=ndold(:,imode)
++    CALL branch_ctx('coag_sol_solve', imode, 0)
++    CALL branch_mask('mask1a', nbox, MERGE(1, 0, mask1a(:)))
+     CALL ukca_solvecoagnucl_v(nbox,mask1a,a,b,c,ndold_v,dtz,deln)
+ 
+     WHERE (ABS(deln(:)) > dn_eps)
+@@ -454,6 +468,8 @@
+ 
+     ! Calculations are only done where NDOLD(:,IMODE) > NUM_EPS
+     mask1(:) =(ndold(:,imode) > num_eps(imode))
++    CALL branch_ctx('coag_insol', imode, 0)
++    CALL branch_mask('mask1', nbox, MERGE(1, 0, mask1(:)))
+ 
+     IF (intraoff /= 1) THEN
+       WHERE (mask1(:)) a(:)=-0.5*kii(:)
+@@ -482,6 +498,9 @@
+           ! .. Also transfer number (include ins-sol term in B summation)
+           xxx(:)=-bterm(:)*dtz
+           mask4(:)=ABS(xxx(:)) > xxx_eps
++          CALL branch_ctx('coag_insol_insol', imode, jmode)
++          CALL branch_mask('mask2', nbox, MERGE(1, 0, mask2(:)))
++          CALL branch_mask('mask4', nbox, MERGE(1, 0, mask4(:)))
+           ! .. above only evaluates exponential where it is "worth it"
+           ! .. (in cases where XXX is larger than specified tolerance XXX_EPS)
+           DO icp=1,ncp
+@@ -499,6 +518,7 @@
+     END IF ! imode < mode_cor_insol
+ 
+     ndold_v(:)=ndold(:,imode)
++    CALL branch_ctx('coag_insol_solve', imode, 0)
+     CALL ukca_solvecoagnucl_v(nbox,mask1,a,b,c,ndold_v,dtz,deln)
+ 
+     WHERE (mask1(:) .AND. ABS(deln(:)) > dn_eps)
+@@ -546,6 +566,8 @@
+ 
+     ! Calculations are only done where ND(:,IMODE) > NUM_EPS
+     mask1(:) =(nd(:,imode) > num_eps(imode))
++    CALL branch_ctx('coag_reset', imode, 0)
++    CALL branch_mask('mask1_entry', nbox, MERGE(1, 0, mask1(:)))
+ 
+     mdt(:,imode)=0.0
+     mtrannet(:)=0.0
+@@ -563,6 +585,9 @@
+         END IF
+         mdcpold(:)=ndold(:,imode)*mdold(:,icp,imode)
+         mdcpnew(:)=mdcpold(:)+mtrannet(:)
++        CALL branch_ctx('coag_reset', imode, icp)
++        CALL branch_mask('mdcp_neg', nbox,                               &
++                         MERGE(1, 0, mask1(:) .AND. (mdcpnew(:) < 0.0)))
+         ! where MDCPNEW<0, set ND to zero (MDT,MD reset at end routine)
+         WHERE (mask1(:) .AND. (mdcpnew(:) < 0.0))
+           nd(:,imode)=0.0
+@@ -570,6 +595,8 @@
+           ! n.b. MD and MDT will be re-set at end of routine
+         END WHERE
+         mask3(:)=mask1(:) .AND. (mdcpnew(:) >= 0.0)
++        CALL branch_mask('mask1_after', nbox, MERGE(1, 0, mask1(:)))
++        CALL branch_mask('mask3', nbox, MERGE(1, 0, mask3(:)))
+         WHERE (mask3(:))
+           md(:,imode,icp)=mdcpnew(:)/nd(:,imode)
+           mdt(:,imode)=mdt(:,imode)+md(:,imode,icp)
+diff --color -ruN a/src/ukca/ukca_conden.F90 b/src/ukca/ukca_conden.F90
+--- a/src/ukca/ukca_conden.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_conden.F90	2026-08-13 19:24:16
+@@ -168,6 +168,10 @@
+     nmascondsusupins, nmascondocsupins, nmascondsosupins, dimen,               &
+     condensable, condensable_choice, mm_gas
+ 
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_ctx,                                                                &
++    branch_mask,                                                               &
++    branch_one
+ USE yomhook,              ONLY: lhook, dr_hook
+ USE parkind1,             ONLY: jprb, jpim
+ USE ereport_mod,          ONLY: ereport
+@@ -294,6 +298,8 @@
+     delgc_cond(:,jv)=0.0
+ 
+     mask1(:) = gc(:,jv) > conc_eps
++    CALL branch_ctx('conden', jv, 0)
++    CALL branch_mask('mask1', nbox, MERGE(1, 0, mask1(:)))
+ 
+     sumnc(:)=0.0
+     DO imode=1,topmode
+@@ -308,6 +314,8 @@
+ 
+         nc(:,imode)=0.0
+         mask2(:) = mask1(:) .AND. (nd(:,imode) > num_eps(imode))
++        CALL branch_ctx('conden_mode', jv, imode)
++        CALL branch_mask('mask2', nbox, MERGE(1, 0, mask2(:)))
+ 
+         rp(:)=wetdp(:,imode)*0.5*y2 ! radius to use for condensation
+ 
+@@ -350,6 +358,11 @@
+ 
+     ! .. Update condensable cpt concentration (molecules cm^-3)
+     mask2(:) = mask1(:) .AND. (delgc_cond(:,jv) > conc_eps)
++    CALL branch_ctx('conden_uptake', jv, 0)
++    CALL branch_mask('mask2', nbox, MERGE(1, 0, mask2(:)))
++    CALL branch_mask('up4_guard', nbox,                                  &
++                     MERGE(1, 0, mask2(:) .AND.                          &
++                                 delgc_cond(:,jv) > gc(:,jv)))
+     WHERE (mask2(:) .AND. delgc_cond(:,jv) > gc(:,jv))
+       delgc_cond(:,jv)=delgc_cond(:,jv)/gc(:,jv) ! make sure no -ves
+     END WHERE
+@@ -386,6 +399,11 @@
+              (topmode > mode_ait_insol) ) THEN
+           mask4i(:) = mask2(:) .AND. ( nd(:,mode_sup_insol) > num_eps(imode) )
+         END IF
++
++        CALL branch_ctx('conden_dist', jv, imode)
++        CALL branch_mask('mask3', nbox, MERGE(1, 0, mask3(:)))
++        CALL branch_mask('mask3i', nbox, MERGE(1, 0, mask3i(:)))
++        CALL branch_mask('mask4i', nbox, MERGE(1, 0, mask4i(:)))
+ 
+         IF ( imode == mode_nuc_sol ) THEN
+ 
+diff --color -ruN a/src/ukca/ukca_remode.F90 b/src/ukca/ukca_remode.F90
+--- a/src/ukca/ukca_remode.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_remode.F90	2026-08-13 19:24:16
+@@ -120,6 +120,10 @@
+     nmasmergntintr34, nmasmergnhintr34, nmasmergnnintr34, nmasmergmpintr23,    &
+     nmasmergmpintr34
+ 
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_ctx,                                                                &
++    branch_mask,                                                               &
++    branch_one
+ USE yomhook,   ONLY: lhook, dr_hook
+ USE parkind1,  ONLY: jprb, jpim
+ USE ukca_um_legacy_mod, ONLY: umErf
+@@ -202,6 +206,8 @@
+ 
+ nmodemax_merge(:)=3
+ WHERE (pmid(:) < 1.0e4) nmodemax_merge(:)=2
++CALL branch_ctx('remode', 0, 0)
++CALL branch_mask('nmodemax_merge', nbox, INT(nmodemax_merge(:)))
+ 
+ DO jl=1,nbox
+   DO imode=1,nmodemax_merge(jl)
+@@ -231,6 +237,11 @@
+       END IF
+ 
+       ! .. 1st threshold determines if mode-merging to take place.
++      CALL branch_ctx('remode', imode, 0)
++      CALL branch_one('merge_trigger', jl,                               &
++                      MERGE(1, 0, (dp > dp_thresh1) .OR. (imerge == 3)))
++      CALL branch_one('nd_gt_eps', jl,                                   &
++                      MERGE(1, 0, nd(jl,imode) > num_eps(imode)))
+       IF ((dp > dp_thresh1) .OR. (imerge == 3)) THEN
+ 
+         IF (nd(jl,imode) > num_eps(imode)) THEN
+@@ -245,6 +256,7 @@
+           frac_n=0.5*(1.0+umErf(erfnum))
+ 
+           ! .. limit DELN to be max = half # of ptcls
++          CALL branch_one('frac_n_clamp', jl, MERGE(1, 0, frac_n < 0.5))
+           IF (frac_n < 0.5) frac_n=0.5
+ 
+           deln=nd(jl,imode)*(1.0-frac_n)
+@@ -258,6 +270,7 @@
+           frac_m=0.5*(1.0+umErf(erfmas))
+ 
+           ! .. limit DELM to be max 99.9%
++          CALL branch_one('frac_m_clamp', jl, MERGE(1, 0, frac_m < 0.001))
+           IF (frac_m < 0.001) frac_m=0.001
+ 
+           ! .. calculate new number concs for mode and larger mode
+@@ -268,6 +281,8 @@
+           !
+           ! .. This section updates mode from which merging is taking place
+ 
++          CALL branch_one('newn_gt_eps', jl,                             &
++                          MERGE(1, 0, newn > num_eps(imode)))
+           IF (newn > num_eps(imode)) THEN
+ 
+             DO icp=1,ncp
+diff --color -ruN a/src/ukca/ukca_solvecoagnucl_v.F90 b/src/ukca/ukca_solvecoagnucl_v.F90
+--- a/src/ukca/ukca_solvecoagnucl_v.F90	2026-08-13 19:22:10
++++ b/src/ukca/ukca_solvecoagnucl_v.F90	2026-08-13 19:24:16
+@@ -116,6 +116,10 @@
+ !
+ !--------------------------------------------------------------------
+ 
++USE glomap_branch_mod,                       ONLY:                             &
++    branch_ctx,                                                                &
++    branch_mask,                                                               &
++    branch_one
+ USE yomhook,  ONLY: lhook, dr_hook
+ USE parkind1, ONLY: jprb, jpim
+ USE ereport_mod, ONLY: ereport
+@@ -164,6 +168,8 @@
+ REAL    :: term4(nv)
+ REAL    :: eps_ab
+ REAL    :: eps_d
++INTEGER :: brn_code(nv)   ! validation instrumentation, see glomap_branch_mod
++INTEGER :: brn_flag(nv)
+ CHARACTER(LEN=errormessagelength) :: cmessage        ! error message
+ 
+ INTEGER(KIND=jpim), PARAMETER :: zhook_in  = 0
+@@ -240,6 +246,35 @@
+ END DO
+ 
+ 
++! Validation instrumentation. Record which of the closed forms below each
++! element actually takes -- the single most decisive gate-0 signal, since the
++! forms are not perturbations of one another and a flipped predicate gives an
++! O(1) difference between two correct implementations.
++!
++!   0  masked out (DELN forced to zero)
++!   1  A/=0, D<0  -- solved
++!   2  A/=0, D<0  -- degenerate TERM3 or TERM4, NDNEW left at ND
++!   3  A/=0, D>0  -- TAN branch
++!   4  A/=0, D=0, B/=0 -- error branch (IERR=1, ereport)
++!   5  A/=0, D=0, B=0  -- the 1/(1/N - 3*A*dt) form (upstream defect UP-1)
++!   6  A==0, B/=0
++!   7  A==0, B==0
++brn_code(:) = 0
++WHERE (logic1a(:) .AND. logic1aok2(:))         brn_code(:) = 1
++WHERE (logic1a(:) .AND. (.NOT. logic1aok2(:))) brn_code(:) = 2
++WHERE (logic1b(:))                             brn_code(:) = 3
++WHERE (logic1ca(:))                            brn_code(:) = 4
++WHERE (logic1cb(:))                            brn_code(:) = 5
++WHERE (logic2a(:))                             brn_code(:) = 6
++WHERE (logic2b(:))                             brn_code(:) = 7
++CALL branch_mask('form', nv, brn_code)
++CALL branch_mask('mask', nv, MERGE(1, 0, mask(:)))
++CALL branch_mask('logic3', nv, MERGE(1, 0, logic3(:)))
++! The SQD*DTZ > 50 hard clamp: an EXP overflow guard, so it is a discontinuity
++! in the solution, not a rounding detail.
++brn_flag(:) = 0
++WHERE (logic1aok(:)) brn_flag(:) = MERGE(1, 0, sqd(:)*dtz > 50.0)
++CALL branch_mask('sqd_clamp', nv, brn_flag)
+ WHERE (logic1aok2(:))
+   ndnew(:)=(2.0*sqd(:)/term4(:)-b(:)-sqd(:))/2.0/a(:)
+ END WHERE
+@@ -251,6 +286,11 @@
+   term2(:)=ATAN(term1(:))+sqd(:)*dtz/2.0
+   ndnew(:)=(sqd(:)*TAN(term2(:))-b(:))/2.0/a(:)
+ END WHERE
++! TAN(ATAN(x) + SQD*DTZ/2) sign-flips once the argument crosses pi/2, so
++! whether TERM2 is past the pole is itself a branch.
++brn_flag(:) = 0
++WHERE (logic1b(:)) brn_flag(:) = MERGE(1, 0, ABS(term2(:)) > 2.0*ATAN(1.0))
++CALL branch_mask('tan_pole', nv, brn_flag)
+ 
+ ! Below is for case where A /= 0, D = 0 and B/=0 (error)
+ WHERE (logic1ca(:)) ierr(:)=1 ! ! A /= 0, D=0 & B=0
