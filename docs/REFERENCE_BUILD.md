@@ -139,6 +139,59 @@ loosened away within a week.
 Capture does **not** update the manifest. Auto-blessing a capture would make the
 gate silent the one time it matters, so `--write` is always an explicit act.
 
+## The in-process binding (gate A)
+
+```sh
+./validation/build_f2py.sh          # needs meson + ninja on PATH
+```
+
+Gate A is the only mechanism here that reaches machine precision: it calls the
+Fortran in-process, so a routine can be driven with chosen inputs and read back
+at full double precision, with no text file and no accumulated trajectory in
+between. The build is two stages, and the order is not negotiable — the
+vendored Makefile builds the 46 sources first, then f2py wraps a **single**
+self-contained file against those `.mod`s. Handing f2py all 46 fails on the
+first `USE` of a module it has not compiled yet; it has no notion of module
+dependency order. (The TOMAS precedent does not transfer: three fixed-form F77
+files with COMMON blocks and no modules.)
+
+Four things that cost time to learn, recorded so they are not relearned:
+
+| | |
+|---|---|
+| **`meson` is invoked by name** | `numpy.f2py -c` shells out through `PATH`; using `.venv/bin/python` is not enough |
+| **module-level derived types abort the build** | f2py exposes *every* module variable, and `TYPE(box_env_type)` has no C mapping → `KeyError: 'void'`. The state lives in a module f2py is never handed, reached by `USE` from file-scope subroutines |
+| **`REAL(KIND=8)`, never bare `REAL`** | f2py maps the *token* `real` to C float whatever `-fdefault-real-8` says, silently feeding float32 buffers into real(8) dummies. Being explicit removes the need for an `.f2py_f2cmap` |
+| **setter signatures are asymmetric** | f2py infers array dimensions from input arrays and no directive stops it (`required` is ignored). Getters keep their explicit sizes because `INTENT(OUT)` gives nothing to infer from |
+
+That last one matters more than it looks. f2py only guarantees `n1`/`n2` agree
+with the array it was handed — it knows nothing about `nmodes`, so a
+wrong-width array arrives as a self-consistent pair and reaches Fortran
+unchallenged. The comparison against the module's own sizes inside each
+accessor is the only real check.
+
+**The binding reproduces the committed goldens bit for bit.** It is built from
+the plain vendored tree while the goldens came from the fully patched stage, so
+that agreement says three things at once: the wrapper's transcription of the
+driver is faithful, the `ES24.16` overlay round-trips float64 without loss, and
+the overlays really are instrumentation rather than science.
+
+**One process per setup.** `ukca_mode_setup` allocates under
+`IF (.NOT. ALLOCATED)` and never deallocates, and the 283 `nmas*` budget
+indices have no initialiser, so a second `init_ukca_for_box` leaves stale
+indices — and since `nbudaer` changes too (8 vs 138) a stale index can be out
+of bounds. `wrap_init` refuses a different setup, and because
+`read_box_namelist` must run before the setup is even knowable, a refusal also
+poisons the process: the config scalars have already been replaced, leaving the
+new switches paired with the old mode setup. Every entry point then returns 1
+until the process restarts. `tests/test_f2py_binding.py` runs each case in a
+subprocess accordingly.
+
+**Still outstanding (task 20b):** `ereport` does `STOP 1` in-process, with
+twenty reachable call sites. A subprocess turns that into a non-zero exit code
+rather than a dead interpreter, but driving the binding into an `ereport` path
+still loses the run.
+
 ## Reproducibility — read this before trusting a golden
 
 **Goldens are not portable across compilers or platforms.** Two reasons:

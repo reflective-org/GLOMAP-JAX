@@ -22,5 +22,8 @@ out/
 site/
 fortran/build-ref-*/
 fortran/bin-ref-*/
+fortran/build-f2py/
+fortran/bin-build-f2py/
+validation/f2py/_build/
 fortran/TOOLCHAIN.txt
 .refstage/
