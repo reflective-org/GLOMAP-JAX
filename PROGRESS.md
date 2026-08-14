@@ -41,7 +41,7 @@ Fixed in `3dd6b0f`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **in progress (15/18)**
+## Phase B — reference harness: **in progress (16/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -59,7 +59,8 @@ Fixed in `3dd6b0f`:
 | 18 | Fixture size / Git-LFS ADR | `77f9f5d` |
 | 19 | Commit the reference fixtures | `687d0b3` |
 | 20 | f2py wrapper + in-process binding | `1d060b8` |
-| 21 | Leaf reference-driver pattern + numerics driver | this commit |
+| 21 | Leaf reference-driver pattern + numerics driver | `efd13e7` |
+| 22 | Document the harness; record all upstream defects | this commit |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
@@ -118,6 +119,20 @@ and the live consumer indexes a lookup table), and `powr_v` takes a scalar
 exponent. Plus one hazard the plan did not have: **XLA flushes subnormal
 arithmetic results to zero** while gfortran does not (issue #15, latent).
 
+**The defect record is now mechanical (task 22).** Each of UP-1…UP-10 declares a
+disposition — `fidelity-flag: X`, `invariant-test`, `not-implemented`,
+`harness-patch: F` or `documentation-only` — and
+`tests/test_upstream_defects.py` enforces every row against the code. It
+immediately found that UP-4 had *both* a fidelity flag and an
+UPSTREAM_DEFECTS entry saying it gets an invariant test instead: two documents,
+each internally consistent, contradicting each other, with nothing comparing
+them. The flag is removed (its two settings were bit-identical, so no
+both-settings test could ever have existed) and replaced by an invariant
+asserted over the committed branch-dump goldens.
+
+`docs/harness.md` maps the four gates, what each one catches, and — the part
+that is easy to leave implicit — what each one cannot.
+
 **Fixture size (task 16, and most of task 18's answer).** The complete golden
 set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.80 MB** as
 compressed `.npz`, against roughly 70 MB of CSV from the reference. The state
@@ -140,7 +155,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-Remaining: 22, 23 and 20b.
+Remaining: 23 and 20b.
 
 ## Phases C–K — physics: not started (0/82)
 

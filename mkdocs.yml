@@ -9,6 +9,7 @@ nav:
   - Architecture: architecture.md
   - Physics: physics.md
   - Porting notes: porting-notes.md
+  - Validation harness: harness.md
   - Fidelity flags: fidelity.md
   - Upstream defects: UPSTREAM_DEFECTS.md
   - Unsupported: unsupported.md

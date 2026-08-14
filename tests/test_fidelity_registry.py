@@ -28,7 +28,6 @@ FIDELITY_DOC = REPO / "docs" / "fidelity.md"
 FORTRAN_BEHAVIOUR = {
     "coag_intra_factor3": True,
     "ageing_totage_rescale_noop": True,
-    "conden_delgc_over_gc": True,
     "s_cond_s_zero_when_cond_off": True,
     "conden_insol_num_eps_by_sol_mode": True,
     "drydiam_undersize_reset": True,

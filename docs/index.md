@@ -15,6 +15,7 @@ Order 1 (faithful port) in progress. See `PROGRESS.md` in the repository root.
 ## Start here
 
 * [Porting notes](porting-notes.md) — the traps, and why they are traps
+* [Validation harness](harness.md) — the four gates, and what each cannot catch
 * [Fidelity flags](fidelity.md) — where the port deliberately reproduces
   upstream bugs
 * [Unsupported](unsupported.md) — what this does **not** do

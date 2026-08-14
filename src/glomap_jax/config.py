@@ -10,10 +10,15 @@ Each flag carries a written rationale in ``docs/fidelity.md`` and is tested at
 both settings, and ``tests/test_fidelity_registry.py`` fails on any flag that
 lacks either.
 
-"Obviously a bug, so I fixed it" is how a port stops being a port. Two of the
-flags below are cases where the naive fix is actively wrong: ``ageing_totage_``
-``rescale_noop`` would lose mass if "corrected", and ``conden_delgc_over_gc``
-guards a branch that cannot execute.
+"Obviously a bug, so I fixed it" is how a port stops being a port. The clearest
+case below is ``ageing_totage_rescale_noop``, where the naive fix would lose
+mass outright.
+
+Not every upstream defect earns a flag. A flag is for a defect the port must
+*choose* to reproduce; where there is nothing to choose -- an unreachable
+branch, a documentation error, an unsupported switch -- the disposition is
+recorded in ``docs/UPSTREAM_DEFECTS.md`` and enforced by
+``tests/test_upstream_defects.py`` instead.
 """
 
 from dataclasses import dataclass, field
@@ -143,12 +148,14 @@ class FidelityConfig:
     # must transfer all of it or mass is lost.
     ageing_totage_rescale_noop: bool = True
 
-    # UP-4. ukca_conden.F90:353-354 clamps with `delgc_cond = delgc_cond/gc`
-    # where `= gc` was intended. The guard is unreachable -- delgc_cond =
-    # gc*(1-exp(-x)) with x >= 0 is bounded in [0, gc] -- so both settings are
-    # bit-identical today. Kept as a flag so the invariant is asserted rather
-    # than assumed.
-    conden_delgc_over_gc: bool = True
+    # UP-4 deliberately has NO flag. ukca_conden.F90:353-354 clamps with
+    # `delgc_cond = delgc_cond/gc` where `= gc` was intended, but the guard is
+    # unreachable: three lines above, delgc_cond = gc*(1-exp(-x)) with x >= 0
+    # bounds it in [0, gc]. Both settings would be bit-identical, so no
+    # both-settings test could ever distinguish them and the flag would sit
+    # here forever as an untestable decision. The unreachability is asserted
+    # instead -- see tests/test_upstream_defects.py, which checks the guard is
+    # false in every record of every committed branch-dump golden.
 
     # UP-6. s_cond_s is read by ukca_calcnucrate when cond_on=0 and nucl_on=1,
     # having never been assigned. JAX has no undefined memory, so the port must

@@ -57,20 +57,6 @@ changes Gate B budget comparisons and never `nd`/`md`/`mdt`.
 lose mass: `ukca_conden` records condensate onto insoluble modes only in
 `ageterm1` and never adds it to insoluble `md`, so ageing must move all of it.
 
-## `conden_delgc_over_gc`
-
-**Default `True` — reproduce the Fortran.** Upstream defect UP-4.
-
-`ukca_conden.F90:353-354` clamps with `delgc_cond = delgc_cond / gc` under a
-comment reading "make sure no -ves". `= gc` was evidently intended; dividing
-yields a dimensionally meaningless O(1) value.
-
-**Currently unreachable**, so both settings are bit-identical. Three lines
-above, `delgc_cond = gc·(1 − exp(−sumnc·dtz))` with `sumnc ≥ 0`, which bounds
-`delgc_cond` in `[0, gc]`, so the `> gc` guard cannot fire. The flag exists so
-the invariant is asserted rather than assumed — if a future change breaks it,
-the test notices.
-
 ## `s_cond_s_zero_when_cond_off`
 
 **Default `True` — the port is necessarily better-defined here.** Upstream

@@ -6,25 +6,43 @@ box model and planning this port.
 **Status: drafted, not yet filed.** By decision, Reflective files these
 upstream, not the port. Issue
 [#1](https://github.com/reflective-org/GLOMAP-JAX/issues/1) tracks it. Two are
-already carried as patches here (`fortran/patches/`); the rest are reproduced
-faithfully behind fidelity flags — see [fidelity.md](fidelity.md).
+carried as patches to the vendored tree because the reference is unusable
+without them; four are reproduced faithfully behind fidelity flags (see
+[fidelity.md](fidelity.md)); the remaining four need no code action, for
+reasons the disposition table below makes explicit.
 
 Each entry states **reachability** explicitly, because six of the ten are
 latent, config-gated or diagnostic-only, and conflating those with
 "changes results" misdirects both upstream and the port.
 
-| ID | Location | Reachability |
+Each also states a **disposition**: what the port does about it. Not every
+defect earns a fidelity flag — a flag is for a defect the port must *choose* to
+reproduce, and where there is nothing to choose the honest answer is something
+else. `tests/test_upstream_defects.py` enforces every row of this table, so a
+disposition cannot be claimed here and quietly not exist in the code.
+
+| ID | Location | Reachability | Disposition |
+|---|---|---|---|
+| UP-1 | `ukca_solvecoagnucl_v.F90:259` | **changes results, every substep** | `fidelity-flag: coag_intra_factor3` |
+| UP-2 | `ukca_solvecoagnucl_v.F90:60-68` | documentation only | `documentation-only` |
+| UP-3 | `ukca_ageing.F90:296-298` | diagnostics only | `fidelity-flag: ageing_totage_rescale_noop` |
+| UP-4 | `ukca_conden.F90:353-354` | unreachable, latent | `invariant-test` |
+| UP-5 | `ukca_coag_coff_v.F90:339-340` | feature unusable (`icoag=4`) | `not-implemented` |
+| UP-6 | `ukca_aero_step.F90:504/1034` | direct callers only, not the UM | `fidelity-flag: s_cond_s_zero_when_cond_off` |
+| UP-7 | `ukca_aero_step.F90:1022-1023` | fatal under bounds checking | `harness-patch: 0001-guard-msec_org-zero-index.patch` |
+| UP-8 | `ereport_mod.F90:50` | standalone harnesses only | `harness-patch: 0002-ereport-nonzero-exit-status.patch` |
+| UP-9 | `ukca_conden.F90:52-53` | documentation only | `documentation-only` |
+| UP-10 | `ukca_conden.F90:372-387` | **changes results on setup 8** | `fidelity-flag: conden_insol_num_eps_by_sol_mode` |
+
+What each disposition means, and what the test checks:
+
+| disposition | meaning | checked by |
 |---|---|---|
-| UP-1 | `ukca_solvecoagnucl_v.F90:259` | **changes results, every substep** |
-| UP-2 | `ukca_solvecoagnucl_v.F90:60-68` | documentation only |
-| UP-3 | `ukca_ageing.F90:296-298` | diagnostics only |
-| UP-4 | `ukca_conden.F90:353-354` | unreachable, latent |
-| UP-5 | `ukca_coag_coff_v.F90:339-340` | feature unusable (`icoag=4`) |
-| UP-6 | `ukca_aero_step.F90:504/1034` | direct callers only, not the UM |
-| UP-7 | `ukca_aero_step.F90:1022-1023` | fatal under bounds checking |
-| UP-8 | `ereport_mod.F90:50` | standalone harnesses only |
-| UP-9 | `ukca_conden.F90:52-53` | documentation only |
-| UP-10 | `ukca_conden.F90:372-387` | **changes results on setup 8** |
+| `fidelity-flag: X` | the port reproduces the defect by default and can be told not to | `X` is a real `FidelityConfig` field, has a `docs/fidelity.md` section, and that section cites this defect |
+| `invariant-test` | nothing to choose — the defect is unreachable, and that is asserted rather than assumed | a test in this file names the defect and checks the invariant |
+| `not-implemented` | the affected feature has no correct reference to validate against, so the port refuses it | recorded in `docs/unsupported.md` |
+| `harness-patch: F` | the reference itself is unusable without a fix; carried as a patch to the vendored tree | `fortran/patches/F` exists |
+| `documentation-only` | a comment or header disagrees with the code; the code is right | no code action; the entry says which to trust |
 
 ## UP-1 — spurious factor 3 in the `dN/dt = A·N²` branch
 
