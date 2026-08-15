@@ -25,6 +25,7 @@ wrong loop, would fail conspicuously rather than subtly.
 """
 
 import csv
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -102,4 +103,5 @@ def test_nmts3_case_runs_and_is_finite(tmp_path):
     _run(exe, REPO / "validation" / "namelists" / "bl_nmts3.nml", out, "out/bl_nmts3.csv")
     _, rows = _load(out)
     assert len(rows) == 49
-    assert all(v == v for r in rows for v in r)
+    # isfinite, not `v == v`: the latter rejects NaN and passes Infinity.
+    assert all(math.isfinite(v) for r in rows for v in r)

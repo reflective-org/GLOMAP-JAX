@@ -24,6 +24,7 @@ overlay, so the reference can actually carry the precision it computes in.
 """
 
 import csv
+import math
 import shutil
 import subprocess
 from pathlib import Path
@@ -86,7 +87,10 @@ def test_variant_builds_and_runs(built, tmp_path, variant):
     _run(exe, out, built / "namelists" / "boundary_layer.nml")
     _, rows = _load(out)
     assert len(rows) == 49, "expected 48 steps plus the initial state"
-    assert all(v == v for r in rows for v in r), "non-finite value in reference output"
+    # `v == v` rejects NaN but passes Infinity, which gfortran writes as
+    # `Infinity` and Python parses to `inf`. A reference that blew up would have
+    # sailed through.
+    assert all(math.isfinite(v) for r in rows for v in r), "non-finite value in reference output"
 
 
 @needs_gfortran
@@ -175,7 +179,17 @@ def test_high_precision_value_round_trips_through_python(built, tmp_path):
     col = next(i for i, h in enumerate(header) if h.startswith("Ddry_aitsol"))
     text = rows[-1][col].strip()
     value = float(text)
-    # Re-rendering at the same precision must reproduce the file's digits, i.e.
-    # nothing was lost in the write.
-    assert float(f"{value:.16E}") == value
+    # The phase B review found this test asserted `float(f"{value:.16E}") ==
+    # value` and `abs(value - float(text)) == 0.0` -- 17 significant digits
+    # round-trip EVERY double, and the second compares a value to itself.
+    # Reverting the overlay to ES14.6 did not fail it.
+    #
+    # The real property: the file's own digits must survive parse -> re-render
+    # at the file's own format. That fails immediately if the reference emits
+    # fewer digits than a double needs.
+    rendered = f"{value:24.16E}".strip()
+    assert rendered == text, (
+        f"the reference wrote {text!r}, which does not re-render to itself at "
+        f"ES24.16 ({rendered!r}) -- the write lost precision"
+    )
     assert abs(value - float(text)) == 0.0

@@ -48,6 +48,32 @@ def _documented_names():
     return set(re.findall(r"^## `([a-z0-9_]+)`", text, flags=re.MULTILINE))
 
 
+# Flags no ported code reads yet, with the phase that will. This list must
+# SHRINK; it is not a suppression mechanism. Every entry is a promise.
+NOT_YET_CONSUMED = {
+    "coag_intra_factor3",  # phase H, task 66
+    "ageing_totage_rescale_noop",  # phase I, task 74
+    "s_cond_s_zero_when_cond_off",  # phase F, task 57
+    "conden_insol_num_eps_by_sol_mode",  # phase G, task 62
+    "drydiam_undersize_reset",  # phase D, task 37
+    "l_fix_ukca_water_content",  # phase D, task 40
+    "l_fix_neg_pvol_wat",  # phase D, task 38
+    "l_fix_ukca_hygroscopicities",  # phase C, task 30
+    "checkmd_nd",  # phase I, task 79
+    "iextra_checks",  # phase H, task 71
+}
+
+
+def _mentions_in_code(path, name):
+    """True if `name` appears outside a comment. A flag named only in prose is
+    documented, not consumed, and this test exists to tell those apart."""
+    for line in path.read_text(encoding="utf-8").splitlines():
+        code = line.split("#", 1)[0]
+        if name in code:
+            return True
+    return False
+
+
 def test_every_flag_is_in_the_expected_behaviour_table():
     assert _flag_names() == set(FORTRAN_BEHAVIOUR), (
         "FidelityConfig and FORTRAN_BEHAVIOUR disagree; a new flag needs an "
@@ -86,14 +112,31 @@ def test_every_flag_section_states_its_default(name):
 def test_every_flag_is_referenced_in_src(name):
     """A flag nothing reads is a decision that looks recorded and is not.
 
-    config.py itself is excluded -- defining the field is not using it. Flags
-    not yet consumed are expected while the port is in progress, so this test
-    is informational until the phase that should consume them lands.
+    This test had NO ASSERTION until the phase B review: it built `consumers`,
+    skipped if empty, and otherwise fell off the end. Both paths passed, and all
+    ten parametrisations skipped, so the property the module docstring
+    advertises was never checked at all.
+
+    The honest version: no physics is ported yet, so every flag is legitimately
+    unconsumed. That is tracked explicitly in NOT_YET_CONSUMED rather than by a
+    skip, so the list has to shrink as each phase lands, and a flag that is
+    neither consumed nor declared pending fails.
+
+    config.py is excluded -- defining the field is not using it. So are
+    comments: a flag named only in prose is not read by anything.
     """
-    consumers = [
-        p
+    consumers = sorted(
+        p.name
         for p in (REPO / "src").rglob("*.py")
-        if p.name != "config.py" and name in p.read_text(encoding="utf-8")
-    ]
-    if not consumers:
-        pytest.skip(f"{name} not yet consumed; expected until its phase lands")
+        if p.name != "config.py" and _mentions_in_code(p, name)
+    )
+    if name in NOT_YET_CONSUMED:
+        assert not consumers, (
+            f"{name} is consumed by {consumers} but is still listed in "
+            f"NOT_YET_CONSUMED; remove it from the list."
+        )
+    else:
+        assert consumers, (
+            f"{name} is read by nothing under src/. Either consume it or add it "
+            f"to NOT_YET_CONSUMED with the phase that will."
+        )

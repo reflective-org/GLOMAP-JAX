@@ -116,7 +116,9 @@ The header at `:77` states the same expression and needs the same correction.
 ## UP-2 — header swaps arctan and log relative to the code
 
 `:60-68` assigns arctan to `D < 0` and the logarithmic form to `D > 0`; the code
-does the reverse and the code is correct. Port from the code.
+does the reverse.
+
+**Trust the code.** The header is wrong; `:199-212` and `:249-252` are right.
 
 **Impact.** Documentation only; no numerical effect. Reported because anyone
 porting or reviewing this routine from its header — which is the natural thing
@@ -318,6 +320,9 @@ output is redirected. Reachable only on the abort path, so no numerical effect.
 ## UP-9 — header documents `SE_INS = 0.3`, live value is 1.0
 
 `ukca_conden.F90:53` versus `:237`.
+
+**Trust the code.** The live value is `1.0` at `:237`; the header's `0.3` is
+stale.
 
 **Impact.** Documentation only. Reported because `se_ins` is a sticking
 coefficient a user might reasonably tune, and the header is where they would

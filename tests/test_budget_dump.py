@@ -48,8 +48,15 @@ def budgets(tmp_path_factory):
     text = text.replace("  verbose      = 0", f"  verbose      = 0\n  budget_file  = '{bud}'")
     nml.write_text(text, encoding="utf-8")
     subprocess.run([str(exe), str(nml)], check=True, capture_output=True)
+    raw = bud.read_text(encoding="utf-8")
     rows = list(csv.reader(bud.open()))
-    return [h.strip() for h in rows[0]], [[float(x) for x in r] for r in rows[1:]]
+    # The raw text is returned alongside the parsed floats because precision is
+    # a property of the DIGITS, and parsing to float throws them away.
+    return (
+        [h.strip() for h in rows[0]],
+        [[float(x) for x in r] for r in rows[1:]],
+        raw,
+    )
 
 
 def _slot(row, i):
@@ -58,7 +65,7 @@ def _slot(row, i):
 
 @needs_gfortran
 def test_one_row_per_chemistry_step(budgets):
-    _, data = budgets
+    _, data, _ = budgets
     assert len(data) == 48
 
 
@@ -70,13 +77,13 @@ def test_slot_zero_is_never_written(budgets):
     index was left unset and the write fell through to the null slot, which
     would corrupt an unrelated diagnostic in a port that scatters into it.
     """
-    _, data = budgets
+    _, data, _ = budgets
     assert all(_slot(r, 0) == 0.0 for r in data)
 
 
 @needs_gfortran
 def test_condensation_slots_are_active(budgets):
-    _, data = budgets
+    _, data, _ = budgets
     for slot in sorted(CONDENSATION_SLOTS):
         peak = max(abs(_slot(r, slot)) for r in data)
         assert peak > 0.0, f"budget slot {slot} (H2SO4 condensation) is empty"
@@ -84,7 +91,7 @@ def test_condensation_slots_are_active(budgets):
 
 @needs_gfortran
 def test_coagulation_slots_are_active(budgets):
-    _, data = budgets
+    _, data, _ = budgets
     for slot in sorted(COAGULATION_SLOTS):
         peak = max(abs(_slot(r, slot)) for r in data)
         assert peak > 0.0, f"budget slot {slot} (inter-modal coagulation) is empty"
@@ -98,7 +105,7 @@ def test_only_the_physically_expected_slots_are_active(budgets):
     A slot lighting up outside that set means either the physics changed or a
     budget index is being written through the wrong path -- both worth knowing.
     """
-    header, data = budgets
+    header, data, _ = budgets
     n_slots = len(header) - 2
     active = {i for i in range(n_slots) if any(abs(_slot(r, i)) > 0.0 for r in data)}
     expected = CONDENSATION_SLOTS | COAGULATION_SLOTS
@@ -110,6 +117,23 @@ def test_only_the_physically_expected_slots_are_active(budgets):
 
 @needs_gfortran
 def test_budgets_carry_full_precision(budgets):
-    _, data = budgets
+    """The phase B review found this asserted only `peak > 1e6` -- a magnitude
+    check with no bearing on precision. Reverting the budget overlay to ES14.6
+    did not fail it, while the equivalent test in test_state_dump.py did.
+
+    Count the mantissa digits, as that test does."""
+    _, data, text = budgets
     peak = max(abs(_slot(r, 32)) for r in data)
     assert peak > 1.0e6, "accumulation-mode condensation flux implausibly small"
+
+    sample = next(
+        f.strip()
+        for line in text.splitlines()[1:]
+        for f in line.split(",")[2:]
+        if "E" in f and float(f) != 0.0
+    )
+    mantissa = sample.split("E")[0].replace("-", "").replace(".", "")
+    assert len(mantissa.rstrip("0")) >= 10, (
+        f"budget field {sample!r} carries only {len(mantissa.rstrip('0'))} "
+        f"significant digits; the ES24.16 overlay is not in effect"
+    )

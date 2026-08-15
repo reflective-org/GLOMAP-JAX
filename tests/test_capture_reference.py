@@ -128,17 +128,30 @@ def test_wide_streams_round_trip_as_a_named_table(smoke, mode):
     assert np.isfinite(data["values"]).all()
 
 
-@needs_reference
-@pytest.mark.parametrize("mode", ["state", "branches"])
-def test_long_streams_round_trip_through_the_codebook(smoke, mode):
+def test_the_codebook_reconstructs_the_original_labels():
     """The string columns are factorised to keep the archives small. That is only
-    safe if the levels actually reconstruct the original labels."""
-    data = np.load(smoke / f"marine_bcoc.f64.{mode}.npz")
-    sites = data["site_levels"][data["site"]]
-    assert len(sites) == int(data["_rows"])
-    assert set(data["site_levels"]) == set(sites)
-    other = "field" if mode == "state" else "tag"
-    assert data[other].max() < len(data[f"{other}_levels"])
+    safe if the levels actually reconstruct the original labels.
+
+    The phase B review found the previous version of this test never touched the
+    original labels: it asserted `len(levels[codes]) == rows`,
+    `set(levels) == set(levels[codes])` and `codes.max() < len(levels)`, all
+    true of ANY factorisation. Reversing the level table so every code decoded
+    to the wrong label left all fifteen tests in this file passing.
+
+    So decode and compare against the input, on data with the properties that
+    break naive factorisation: repeats, a singleton, and a label that first
+    appears last."""
+    header = ["step", "imts", "izts", "site", "i1", "i2", "tag", "ibox", "value"]
+    labels = ["conden", "conden", "remode", "conden", "ageing", "remode", "zzz"]
+    rows = [["1", "1", "1", s, "0", "0", f"t{i}", "1", "0"] for i, s in enumerate(labels)]
+
+    packed = cr._pack_long("branches", header, rows)
+    decoded = list(packed["site_levels"][packed["site"]])
+    assert decoded == labels, f"codebook does not round-trip: {decoded} != {labels}"
+
+    # First-appearance order, not sorted -- so a diff between two archives is
+    # readable rather than reshuffled.
+    assert list(packed["site_levels"]) == ["conden", "remode", "ageing", "zzz"]
 
 
 @needs_reference

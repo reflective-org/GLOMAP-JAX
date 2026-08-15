@@ -371,26 +371,53 @@ def test_the_shim_counters_reset():
     assert result["after"] == [0, 0, 0]
 
 
-def test_the_shim_is_not_linked_into_the_reference_build():
-    """The load-bearing property of the whole substitution.
+def test_no_overlay_touches_ereport():
+    """Structural half of the shim-containment check, and the one that runs in
+    CI.
 
-    The shim is a deliberate divergence: a fatal error stops being fatal. That
-    is acceptable only because it reaches the f2py extension and nothing else.
-    If it ever leaked into `validation/build_reference.sh`, every golden would
-    have been produced by a binary that continues past errors — and
-    `fortran/patches/0002` exists precisely to make the reference exit
-    non-zero.
+    The previous version asserted `"ereport_shim" not in build_reference.sh`.
+    That script names no source file at all -- it stages `src/`, applies
+    `validation/patches/*.patch` and runs a Makefile that globs `*.F90` -- so
+    no realistic leak has to spell `ereport_shim` in it. The phase B review
+    added one line to `stage_tree`, produced a reference that **exits 0 on a
+    fatal error**, and the whole suite still passed 390/10.
 
-    Carries no skip: it reads scripts and sources rather than running anything,
-    so it holds in CI where there is no gfortran."""
+    Checking the overlays is the check that bites: the staged tree can only
+    differ from the vendored tree through them."""
+    for patch in sorted((REPO / "validation" / "patches").glob("*.patch")):
+        text = patch.read_text(encoding="utf-8")
+        assert "ereport_mod.F90" not in text, (
+            f"{patch.name} patches ereport_mod.F90. The reference must keep the "
+            f"real STOP 1 -- see fortran/patches/0002 and UP-8."
+        )
+        assert "ereport_shim" not in text, f"{patch.name} references the shim"
+
     build_ref = (REPO / "validation" / "build_reference.sh").read_text(encoding="utf-8")
-    assert "ereport_shim" not in build_ref, (
-        "the ereport shim is referenced by build_reference.sh; goldens would be "
-        "produced by a binary that continues past fatal errors"
-    )
-    build_f2py = (REPO / "validation" / "build_f2py.sh").read_text(encoding="utf-8")
-    assert "glomap_ereport_shim.F90" in build_f2py, "the shim is not built at all"
+    assert "ereport" not in build_ref, "build_reference.sh mentions ereport at all"
 
     vendored = (REPO / "fortran" / "src" / "ukca" / "ereport_mod.F90").read_text(encoding="utf-8")
     assert "STOP 1" in vendored, "the vendored ereport no longer stops; see UP-8"
     assert "ereport_shim_counts" not in vendored, "the shim leaked into the vendored tree"
+
+    build_f2py = (REPO / "validation" / "build_f2py.sh").read_text(encoding="utf-8")
+    assert "glomap_ereport_shim.F90" in build_f2py, "the shim is not built at all"
+
+
+@needs_binding
+def test_the_reference_binary_still_dies_on_a_fatal_error():
+    """Behavioural half, and the only one that actually proves the property.
+
+    Structural checks can always be walked around; this cannot. If the shim
+    ever reaches the reference build, a fatal `ereport` stops being fatal and
+    the binary exits 0 -- which is precisely the state
+    `fortran/patches/0002` exists to prevent, and would mean every golden was
+    produced by a binary that continues past errors."""
+    exe = REPO / "fortran" / "bin-ref-f64" / "glomap_box"
+    if not exe.is_file():
+        pytest.skip("reference not built; run validation/build_reference.sh")
+    result = subprocess.run([str(exe), "/nonexistent/namelist.nml"], capture_output=True, text=True)
+    assert result.returncode != 0, (
+        "the reference exited 0 on a fatal ereport. Either patches/0002 was "
+        "reverted or the f2py shim has leaked into the reference build."
+    )
+    assert "shim" not in result.stdout, "the reference is running the shim"

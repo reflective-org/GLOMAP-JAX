@@ -20,7 +20,7 @@ Enabling one is a matter of supplying fields, not writing science.
 
 ## Switches not supported
 
-* **`icoag = 4`** — broken upstream. `ukca_coag_coff_v.F90:339-340` reads
+* **`icoag = 4`** — broken upstream (**UP-5**). `ukca_coag_coff_v.F90:339-340` reads
   `mfppi`/`mfppj`, assigned only inside the mutually exclusive `icoag == 1`
   block, so it always reads undefined memory. There is no correct reference to
   validate against, so this raises rather than producing plausible garbage.

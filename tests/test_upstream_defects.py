@@ -233,9 +233,15 @@ def test_a_not_implemented_defect_is_recorded_as_unsupported(defect):
     """Otherwise a user discovers the refusal at runtime, having assumed parity
     with UM GLOMAP."""
     text = UNSUPPORTED.read_text(encoding="utf-8")
+    assert defect in text, (
+        f"{defect} is not-implemented, but docs/unsupported.md never cites it by "
+        f"ID. A user hitting the refusal has no way back to the analysis."
+    )
     subject = locations()[defect].split(".F90")[0].strip("`").split("/")[-1]
-    assert subject in text or "icoag" in text, (
-        f"{defect} is not-implemented but docs/unsupported.md does not mention it"
+    assert subject in text, (
+        f"docs/unsupported.md cites {defect} but not the routine it is about "
+        f"({subject}). The previous version of this assertion had an `or "
+        f'"icoag" in text` escape hatch that passed regardless.'
     )
 
 
@@ -244,11 +250,19 @@ def test_a_not_implemented_defect_is_recorded_as_unsupported(defect):
 )
 def test_a_documentation_only_defect_says_which_source_to_trust(defect):
     """'The header and the code disagree' is useless to a porter without the
-    next sentence."""
-    text = DEFECTS.read_text(encoding="utf-8")
-    section = text.split(f"## {defect} —", 1)[1].split("\n## ", 1)[0]
-    assert re.search(r"code is correct|code is right|Port from the code|versus", section), (
-        f"{defect} does not say which of the two sources to believe"
+    next sentence.
+
+    The previous version matched `code is correct|code is right|Port from the
+    code|versus`. For UP-9 the only thing that matched was **`versus`**, which
+    occurs in the incidental line-number cross-reference "`:53` versus `:237`"
+    -- not a statement about which source to believe. Replacing UP-9's body
+    with a stub containing no verdict left the test passing.
+
+    An explicit marker instead of a phrase-list: there is no way to satisfy it
+    accidentally."""
+    section = _section(defect)
+    assert "**Trust the code.**" in section, (
+        f"{defect} is documentation-only but carries no explicit `**Trust the code.**` verdict"
     )
 
 
