@@ -86,11 +86,17 @@ SUBROUTINE wrap_init(namelist_path, ierr)
 USE glomap_box_config_mod, ONLY: read_box_namelist, init_ukca_for_box,         &
     temperature, pressure, rel_humid, spec_humid, height, pbl_height,          &
     box_volume, i_mode_setup, nd_init, dp_init, mfrac_init,                    &
-    h2so4_init, h2so4_prod, sec_org_init, sec_org_prod
+    h2so4_init, h2so4_prod, sec_org_init, sec_org_prod,                        &
+    l_radaer, i_tune_bc, l_fix_nacl_density, l_fix_ukca_hygroscopicities,      &
+    l_dust_mp_ageing
 USE glomap_box_env_mod,    ONLY: set_box_env
 USE glomap_box_state_mod,  ONLY: allocate_state, init_state
 USE glomap_f2py_state,     ONLY: env, st, f2py_nbox, is_initialised,           &
-                                 initialised_setup, must_restart
+                                 must_restart, init_i_mode_setup,              &
+                                 init_l_radaer, init_i_tune_bc,                &
+                                 init_l_fix_nacl_density,                      &
+                                 init_l_fix_ukca_hygroscopicities,             &
+                                 init_l_dust_mp_ageing
 USE ereport_mod,           ONLY: ereport_shim_counts
 
 IMPLICIT NONE
@@ -111,17 +117,31 @@ CALL read_box_namelist(TRIM(namelist_path))
 ! init_ukca_for_box and report success against a configuration it never read.
 CALL ereport_shim_counts(fatal_after, warning, info)
 IF (fatal_after > fatal_before) THEN
+  ! Poison, for the same reason a setup change does. init_ukca_for_box may have
+  ! half-built the mode tables before the ereport, so every later call would
+  ! report success against state derived from a failed init.
+  must_restart = .TRUE.
   ierr = 5
   RETURN
 END IF
 
 IF (is_initialised) THEN
-  IF (i_mode_setup /= initialised_setup) THEN
-    ! Re-initialising would leave stale nmas* indices pointing outside a
-    ! re-sized bud_aer_mas. Refuse -- and poison the process, because
-    ! read_box_namelist above has already replaced every config scalar with the
-    ! new namelist's, so what is left is the new switches paired with the old
-    ! mode setup. That combination never existed and must not be run.
+  ! Compare EVERY variable init_ukca_for_box consumes, not just i_mode_setup.
+  ! It is skipped on a matching re-init, so any of these that changed would be
+  ! read from the new namelist and then ignored -- silently, with ierr = 0.
+  IF ( (i_mode_setup /= init_i_mode_setup) .OR.                                &
+       (l_radaer .NEQV. init_l_radaer) .OR.                                    &
+       (i_tune_bc /= init_i_tune_bc) .OR.                                      &
+       (l_fix_nacl_density .NEQV. init_l_fix_nacl_density) .OR.                &
+       (l_fix_ukca_hygroscopicities .NEQV.                                     &
+        init_l_fix_ukca_hygroscopicities) .OR.                                 &
+       (l_dust_mp_ageing .NEQV. init_l_dust_mp_ageing) ) THEN
+    ! Re-running init_ukca_for_box would leave stale nmas* indices pointing
+    ! outside a re-sized bud_aer_mas; NOT re-running it would silently apply
+    ! the old mode tables to the new namelist. Neither is safe, so refuse --
+    ! and poison the process, because read_box_namelist above has already
+    ! replaced every config scalar. What is left is the new switches paired
+    ! with the old mode tables, a combination that never existed.
     must_restart = .TRUE.
     ierr = 1
     RETURN
@@ -129,7 +149,12 @@ IF (is_initialised) THEN
 ELSE
   CALL init_ukca_for_box()
   is_initialised    = .TRUE.
-  initialised_setup = i_mode_setup
+  init_i_mode_setup = i_mode_setup
+  init_l_radaer     = l_radaer
+  init_i_tune_bc    = i_tune_bc
+  init_l_fix_nacl_density          = l_fix_nacl_density
+  init_l_fix_ukca_hygroscopicities = l_fix_ukca_hygroscopicities
+  init_l_dust_mp_ageing            = l_dust_mp_ageing
 END IF
 
 CALL set_box_env(env, f2py_nbox, temperature, pressure, rel_humid, spec_humid, &
@@ -139,6 +164,7 @@ CALL init_state(st, env, nd_init, dp_init, mfrac_init,                         &
                 h2so4_init, sec_org_init, h2so4_prod, sec_org_prod)
 
 CALL ereport_shim_counts(fatal_after, warning, info)
+IF (fatal_after > fatal_before) must_restart = .TRUE.
 ierr = MERGE(5, 0, fatal_after > fatal_before)
 
 END SUBROUTINE wrap_init
@@ -257,7 +283,10 @@ CALL update_size(st, env)
 ! ukca_aero_step has twenty reachable ereport sites, several of them inside the
 ! substep loop. Without this the shim would turn a fatal into a plausible
 ! trajectory.
+! A fatal mid-step leaves st mutated part-way through; the next wrap_step would
+! otherwise return 0 on it.
 CALL ereport_shim_counts(fatal_after, warning, info)
+IF (fatal_after > fatal_before) must_restart = .TRUE.
 ierr = MERGE(5, 0, fatal_after > fatal_before)
 
 END SUBROUTINE wrap_step

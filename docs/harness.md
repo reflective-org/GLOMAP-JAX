@@ -70,8 +70,20 @@ Two shapes:
 the inputs you chose; it says nothing about whether the driver calls it at the
 right time with the right state.
 
-**Constraint that shapes everything around it:** setup is initialisable **once
-per process**. `ukca_mode_setup` allocates under `IF (.NOT. ALLOCATED)` and
+**Constraint that shapes everything around it:** the UKCA mode tables are
+built **once per process**, and `wrap_init` refuses any re-init that would need
+them rebuilt — which means any change to `i_mode_setup`, `l_radaer`,
+`i_tune_bc`, `l_fix_nacl_density`, `l_fix_ukca_hygroscopicities` or
+`l_dust_mp_ageing`. Re-running an *identical* namelist is fine and is how a
+driver resets between cases; anything else needs a fresh process.
+
+Keying that guard on `i_mode_setup` alone was a real defect, found by the phase
+B review: the other five were read from the new namelist and then ignored,
+because `common_mode_setup_interface` was never re-called. Measured 2.3e-5 in
+`drydp`, reported as `ierr = 0`, in the one mechanism whose whole purpose is
+comparing at machine precision.
+
+The underlying reason a rebuild is impossible: `ukca_mode_setup` allocates under `IF (.NOT. ALLOCATED)` and
 never deallocates, and the 283 `nmas*` budget indices have no initialiser, so a
 second init leaves stale indices — and since `nbudaer` also changes (8 vs 138) a
 stale index can be out of bounds. One process per setup, enforced rather than

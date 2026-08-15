@@ -41,7 +41,19 @@ TYPE(box_state_type), SAVE :: st
 ! bounds. These two let wrap_init refuse rather than corrupt memory; running
 ! several setups needs one process each, which is task 20b.
 LOGICAL, SAVE :: is_initialised    = .FALSE.
-INTEGER, SAVE :: initialised_setup = -1
+
+! Every namelist variable init_ukca_for_box consumes, recorded at the init that
+! actually ran. Keying only on i_mode_setup was not enough: the phase B review
+! showed that changing l_fix_nacl_density between two wrap_init calls in one
+! process was silently ignored -- common_mode_setup_interface was never
+! re-called, glomap_variables kept the first namelist's densities, and drydp
+! came out 2.3e-5 wrong with ierr = 0. Against a gate advertised at ~1e-14.
+INTEGER, SAVE :: init_i_mode_setup = -1
+LOGICAL, SAVE :: init_l_radaer     = .FALSE.
+INTEGER, SAVE :: init_i_tune_bc    = -1
+LOGICAL, SAVE :: init_l_fix_nacl_density = .FALSE.
+LOGICAL, SAVE :: init_l_fix_ukca_hygroscopicities = .FALSE.
+LOGICAL, SAVE :: init_l_dust_mp_ageing = .FALSE.
 
 ! Set when a re-init is refused. read_box_namelist has to run before the setup
 ! is even knowable, so by the time wrap_init can refuse it has already

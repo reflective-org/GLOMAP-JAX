@@ -259,9 +259,49 @@ def test_reinit_with_a_different_setup_is_refused_and_poisons_the_process():
 
 
 @needs_binding
-def test_reinit_with_the_same_setup_is_allowed_and_resets_the_state():
-    """Re-running one setup is safe — the mode tables and indices are already
-    correct — and is how a per-routine driver will reset between cases."""
+def test_reinit_with_a_different_mode_switch_is_refused():
+    """`i_mode_setup` is not the only thing `init_ukca_for_box` consumes.
+
+    `common_mode_setup_interface` also takes `l_radaer`, `i_tune_bc`,
+    `l_fix_nacl_density`, `l_fix_ukca_hygroscopicities` and `l_dust_mp_ageing`.
+    The guard used to key on `i_mode_setup` alone, so changing any of the other
+    five between two inits in one process was **silently ignored**:
+    `read_box_namelist` had already overwritten them, but
+    `common_mode_setup_interface` was never re-called, so `glomap_variables`
+    kept the first namelist's densities. Measured 2.3e-5 in `drydp`, with
+    `ierr = 0`, against a gate advertised at ~1e-14.
+
+    A silent wrong answer, in the routine whose entire purpose is comparing
+    numbers at machine precision."""
+    nml = NAMELISTS / "boundary_layer.nml"
+    text = nml.read_text(encoding="utf-8")
+    # The shipped namelist leaves l_fix_nacl_density at its .TRUE. default, so
+    # the differing namelist has to set it explicitly.
+    assert "&box_aerosol" in text
+    flipped = text.replace("&box_aerosol", "&box_aerosol\n  l_fix_nacl_density = .FALSE.", 1)
+
+    result = run_in_subprocess(f"""
+        import pathlib, tempfile
+        d = pathlib.Path(tempfile.mkdtemp())
+        b = d / 'flipped.nml'
+        b.write_text({flipped!r})
+        first = g.wrap_init(NAMELISTS + '/boundary_layer.nml')
+        second = g.wrap_init(str(b))
+        result = {{'first': int(first), 'second': int(second),
+                   'step_after': int(g.wrap_step()),
+                   'sizes_after': int(g.wrap_sizes()[-1])}}
+    """)
+    assert result["first"] == 0
+    assert result["second"] == 1, "a changed mode switch must be refused, not ignored"
+    assert result["step_after"] == 1, "the process must be poisoned"
+    assert result["sizes_after"] == 1
+
+
+@needs_binding
+def test_reinit_with_an_identical_namelist_is_allowed_and_resets_the_state():
+    """Re-running the *same* namelist is safe — the mode tables and indices are
+    already correct for it — and is how a per-routine driver resets between
+    cases. Anything else needs a fresh process; see the test above."""
     result = run_in_subprocess("""
         g.wrap_init(NAMELISTS + '/marine_bcoc.nml')
         nbox, nmodes = g.wrap_sizes()[:2]
@@ -342,18 +382,29 @@ def test_a_fatal_ereport_is_reported_as_an_error_not_as_success():
     So the entry points that run Fortran check the shim's fatal counter
     themselves. Before this test existed, `wrap_init` on a nonexistent namelist
     returned 0."""
-    result = run_in_subprocess("""
+    poisoned = run_in_subprocess("""
         bad = g.wrap_init('/nonexistent/path.nml')
+        # Resetting the counters must NOT clear the poison: init_ukca_for_box
+        # may have half-built the mode tables before the ereport, so every
+        # later call would report success against state derived from it.
         g.wrap_ereport_reset()
+        result = {'bad': int(bad),
+                  'init_after': int(g.wrap_init(NAMELISTS + '/marine_bcoc.nml')),
+                  'step_after': int(g.wrap_step()),
+                  'sizes_after': int(g.wrap_sizes()[-1])}
+    """)
+    assert poisoned["bad"] == 5, "a failed init must report 5, not success"
+    assert poisoned["init_after"] == 1, "a fatal must poison the process"
+    assert poisoned["step_after"] == 1
+    assert poisoned["sizes_after"] == 1
+
+    clean = run_in_subprocess("""
         good = g.wrap_init(NAMELISTS + '/marine_bcoc.nml')
         stepped = g.wrap_step()
-        result = {'bad': int(bad), 'good': int(good), 'stepped': int(stepped),
+        result = {'good': int(good), 'stepped': int(stepped),
                   'fatal': int(g.wrap_ereport_count()[0])}
     """)
-    assert result["bad"] == 5, "a failed init must report 5, not success"
-    assert result["good"] == 0
-    assert result["stepped"] == 0
-    assert result["fatal"] == 0, "a clean run must not record a fatal"
+    assert clean == {"good": 0, "stepped": 0, "fatal": 0}
 
 
 @needs_binding
