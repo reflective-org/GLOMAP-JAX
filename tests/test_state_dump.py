@@ -40,9 +40,15 @@ NSTEPS = 3
 NZTS = 15
 VALUES_PER_SNAPSHOT = 8 * (6 + 6)  # 8 modes x (6 scalar fields + 6 components)
 
+# calcnucrate carries the aerosol snapshot AND four gas-phase fields. It needs
+# the latter: ukca_calcnucrate writes only h2so4, delh2so4_nucl, jrate and
+# s_cond_s, none of which the aerosol arrays carry, so before overlay 0005 the
+# site was byte-identical to the preceding conden snapshot in every record.
+GAS_FIELDS_PER_CALL = 4
+
 EXPECTED_RECORDS = {
     "conden": NSTEPS * NZTS * VALUES_PER_SNAPSHOT,
-    "calcnucrate": NSTEPS * NZTS * VALUES_PER_SNAPSHOT,
+    "calcnucrate": NSTEPS * NZTS * (VALUES_PER_SNAPSHOT + GAS_FIELDS_PER_CALL),
     "coagwithnucl": NSTEPS * NZTS * VALUES_PER_SNAPSHOT,
     "ageing": NSTEPS * NZTS * VALUES_PER_SNAPSHOT,
     "drydiam": NSTEPS * 4 * VALUES_PER_SNAPSHOT,
@@ -114,3 +120,58 @@ def test_state_evolves_between_substeps(dump):
         if r["site"] == "conden" and r["field"] == "mdt" and r["imode"] == "2" and r["step"] == "1"
     ]
     assert len(set(vals)) > 1, "mdt is identical across all conden substeps"
+
+
+# --------------------------------------------------------------------------
+# What overlay 0005 fixed
+# --------------------------------------------------------------------------
+
+
+@needs_gfortran
+def test_records_are_uniquely_keyed(dump):
+    """`ukca_calc_drydiam` and `ukca_volume_mode` each run TWICE per `imts` —
+    once before `ukca_remode` and once after — and both were tagged with the
+    same `(site, imts, izts=0)`.
+
+    The phase B review measured the consequence in a committed golden: 13,824
+    duplicate keys, 397 of them carrying two different values, distinguishable
+    only by file row order. A consumer joining on the advertised columns keeps
+    one of each pair, so a port whose post-remode `volume_mode` is wrong but
+    whose pre-remode one is right passes or fails by luck.
+
+    Overlay 0005 adds a per-step call-sequence counter."""
+    keys = [
+        (r["step"], r["seq"], r["site"], r["imts"], r["izts"], r["field"], r["imode"], r["icp"])
+        for r in dump
+    ]
+    assert len(set(keys)) == len(keys), f"{len(keys) - len(set(keys))} duplicate keys"
+
+
+@needs_gfortran
+def test_the_sequence_counter_restarts_each_step_and_is_contiguous(dump):
+    """Otherwise it is an opaque row id rather than a call index."""
+    from collections import defaultdict
+
+    per_step = defaultdict(set)
+    for r in dump:
+        per_step[r["step"]].add(int(r["seq"]))
+    for step, seqs in per_step.items():
+        assert seqs == set(range(1, len(seqs) + 1)), f"step {step}: {sorted(seqs)[:5]}…"
+
+
+@needs_gfortran
+def test_calcnucrate_records_what_calcnucrate_actually_writes(dump):
+    """`ukca_calcnucrate` touches no aerosol array, so before overlay 0005 its
+    snapshot was byte-identical to the preceding `conden` one — 21.7% of the
+    whole dump was repeated records, and a wrong nucleation rate would first
+    have shown up at `coagwithnucl`."""
+    fields = {r["field"] for r in dump if r["site"] == "calcnucrate"}
+    assert {"h2so4", "delh2so4_nucl", "sec_org", "s_cond_s"} <= fields
+
+    evolving = [
+        float(r["value"]) for r in dump if r["site"] == "calcnucrate" and r["field"] == "h2so4"
+    ]
+    assert len(set(evolving)) == len(evolving), (
+        "h2so4 is identical across every substep; the site is still reporting a "
+        "stale copy rather than live state"
+    )

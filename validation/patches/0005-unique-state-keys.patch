@@ -1,0 +1,157 @@
+Make state-dump records uniquely keyed, and give calcnucrate something to say.
+
+Two defects found by the phase B adversarial review, both in overlay 0003.
+
+1. THE KEY WAS NOT UNIQUE. ukca_aero_step calls ukca_calc_drydiam and
+ukca_volume_mode twice per imts -- once before ukca_remode and once after --
+and both were tagged with the same (site, imts, izts=0). Measured in a
+committed golden: boundary_layer.f64.state.npz has 317,952 rows on 304,128
+distinct keys, 13,824 duplicates of which 397 carry two DIFFERENT values.
+For example (step 1, drydiam, imts 1, izts 0, wetdp, mode 2) is both
+6.1103084319857443E-08 and 6.1243391247521387E-08.
+
+Only file row order disambiguated them, and nothing said so. A consumer
+joining JAX output to the golden on the advertised columns silently keeps
+one of each pair -- so a port whose post-remode volume_mode is wrong but
+whose pre-remode one is right passes or fails depending on which.
+
+Fixed with a per-step call-sequence counter, emitted as a new `seq` column.
+It lives in glomap_dump_mod rather than in the call sites, which keeps the
+whole fix inside src/box: no UKCA line has to change to make the key unique.
+
+2. THE calcnucrate SITE OBSERVED NOTHING. ukca_calcnucrate writes only
+h2so4, delh2so4_nucl, jrate and s_cond_s, and dump_state carries none of
+them -- it carries nd, md, mdt, mdwat, drydp, wetdp and rhopar. Between the
+conden dump and the calcnucrate dump the only writers are the nitrate
+blocks, off in every shipped namelist.
+
+So all 720 conden/calcnucrate pairs were element-wise identical, and 21.7%
+of every state dump (69,120 of 317,952 rows) was a byte repeat of the
+preceding record. A port with a wrong nucleation rate would show identical
+snapshots either side of the call and first diverge at coagwithnucl -- the
+overlay pointing at coagulation, not nucleation. The header's claim that
+"comparing after each call tells you WHERE" was false at that site.
+
+Fixed with dump_gas, emitting the four fields the routine actually writes.
+The UKCA-side change is one inserted CALL plus a separate USE statement --
+the existing USE line is left alone, because editing its ONLY list would
+count as a removal and the additivity gate would reject it, correctly.
+
+diff --color -ruN a/src/box/glomap_dump_mod.F90 b/src/box/glomap_dump_mod.F90
+--- a/src/box/glomap_dump_mod.F90	2026-08-14 17:18:53
++++ b/src/box/glomap_dump_mod.F90	2026-08-14 17:19:21
+@@ -29,8 +29,21 @@
+ LOGICAL, SAVE :: dump_open = .FALSE.
+ INTEGER, SAVE :: dump_step = 0
+ 
+-PUBLIC :: dump_start, dump_set_step, dump_state, dump_finish
++! Call sequence within the current chemistry step. ukca_aero_step calls
++! calc_drydiam and volume_mode TWICE per imts -- once before ukca_remode and
++! once after -- and both were tagged with the same (site, imts, izts=0). The
++! phase B review measured the consequence in a committed golden: 13,824
++! duplicate keys, 397 of them carrying two DIFFERENT values, distinguishable
++! only by file row order. A consumer joining on the advertised columns silently
++! kept one of each pair.
++!
++! The counter lives here rather than in the call sites because that keeps the
++! fix entirely inside src/box: no UKCA line has to change to make the key
++! unique.
++INTEGER, SAVE :: dump_seq  = 0
+ 
++PUBLIC :: dump_start, dump_set_step, dump_state, dump_gas, dump_finish
++
+ CONTAINS
+ 
+ SUBROUTINE dump_start(filename)
+@@ -41,13 +54,14 @@
+ ! OPEN(NEWUNIT=) returns a NEGATIVE unit, so openness is tracked explicitly
+ ! rather than by the sign of the unit number.
+ dump_open = .TRUE.
+-WRITE(dump_unit,'(A)') 'step,site,imts,izts,field,imode,icp,value'
++WRITE(dump_unit,'(A)') 'step,seq,site,imts,izts,field,imode,icp,value'
+ END SUBROUTINE dump_start
+ 
+ SUBROUTINE dump_set_step(istep)
+ IMPLICIT NONE
+ INTEGER, INTENT(IN) :: istep
+ dump_step = istep
++dump_seq  = 0
+ END SUBROUTINE dump_set_step
+ 
+ SUBROUTINE dump_state(site, imts, izts, nbox, nmodes, ncp, nd, mdt, md, drydp,  &
+@@ -65,6 +79,7 @@
+ INTEGER :: imode, icp
+ 
+ IF (.NOT. dump_open) RETURN
++dump_seq = dump_seq + 1
+ 
+ DO imode = 1, nmodes
+   CALL emit(site, imts, izts, 'nd',     imode, 0, nd(1,imode))
+@@ -80,13 +95,44 @@
+ 
+ END SUBROUTINE dump_state
+ 
++SUBROUTINE dump_gas(site, imts, izts, nbox, h2so4, delh2so4_nucl, sec_org,     &
++                    s_cond_s)
++! The gas-phase state, for the sites where the aerosol arrays say nothing.
++!
++! ukca_calcnucrate writes only h2so4, delh2so4_nucl, jrate and s_cond_s -- none
++! of which dump_state carries. The phase B review measured the result: all 720
++! conden/calcnucrate snapshot pairs were element-wise identical, and 21.7% of
++! every state dump was a byte-for-byte repeat of the preceding record. A port
++! with a wrong nucleation rate would have shown identical snapshots either side
++! of the call and first diverged at coagwithnucl, so the dump pointed at
++! coagulation.
++!
++! imode is reused as the "component" axis here purely so the record layout
++! matches dump_state; icp is 0 throughout.
++IMPLICIT NONE
++CHARACTER(LEN=*), INTENT(IN) :: site
++INTEGER, INTENT(IN) :: imts, izts, nbox
++REAL,    INTENT(IN) :: h2so4(nbox), delh2so4_nucl(nbox)
++REAL,    INTENT(IN) :: sec_org(nbox), s_cond_s(nbox)
++
++IF (.NOT. dump_open) RETURN
++dump_seq = dump_seq + 1
++
++CALL emit(site, imts, izts, 'h2so4',         0, 0, h2so4(1))
++CALL emit(site, imts, izts, 'delh2so4_nucl', 0, 0, delh2so4_nucl(1))
++CALL emit(site, imts, izts, 'sec_org',       0, 0, sec_org(1))
++CALL emit(site, imts, izts, 's_cond_s',      0, 0, s_cond_s(1))
++
++END SUBROUTINE dump_gas
++
+ SUBROUTINE emit(site, imts, izts, field, imode, icp, value)
+ IMPLICIT NONE
+ CHARACTER(LEN=*), INTENT(IN) :: site, field
+ INTEGER, INTENT(IN) :: imts, izts, imode, icp
+ REAL,    INTENT(IN) :: value
+-WRITE(dump_unit,'(I0,",",A,",",I0,",",I0,",",A,",",I0,",",I0,",",ES24.16)')     &
+-  dump_step, TRIM(site), imts, izts, TRIM(field), imode, icp, value
++WRITE(dump_unit,                                                               &
++  '(I0,",",I0,",",A,",",I0,",",I0,",",A,",",I0,",",I0,",",ES24.16)')           &
++  dump_step, dump_seq, TRIM(site), imts, izts, TRIM(field), imode, icp, value
+ END SUBROUTINE emit
+ 
+ SUBROUTINE dump_finish()
+diff --color -ruN a/src/ukca/ukca_aero_step.F90 b/src/ukca/ukca_aero_step.F90
+--- a/src/ukca/ukca_aero_step.F90	2026-08-14 17:18:53
++++ b/src/ukca/ukca_aero_step.F90	2026-08-14 17:19:53
+@@ -351,6 +351,8 @@
+ 
+ USE glomap_dump_mod,                         ONLY:                             &
+     dump_state
++USE glomap_dump_mod,                         ONLY:                             &
++    dump_gas
+ USE glomap_branch_mod,                       ONLY:                             &
+     branch_set_substep
+ USE yomhook,                                 ONLY:                             &
+@@ -1049,6 +1051,8 @@
+                                   i_nuc_method, height, htpblg, s_cond_s)
+             CALL dump_state('calcnucrate', imts, izts, nbox, nmodes, ncp,           &
+                             nd, mdt, md, drydp, wetdp, mdwat, rhopar)
++            CALL dump_gas('calcnucrate', imts, izts, nbox,                     &
++                          h2so4, delh2so4_nucl, sec_org, s_cond_s)
+             !
+             mask(:)=(h2so4(:) > 0.0)
+             !

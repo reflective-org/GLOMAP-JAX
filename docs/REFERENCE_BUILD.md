@@ -56,6 +56,7 @@ apply.
 | `0002-dump-budgets.patch` | the 283 per-process mass fluxes in `bud_aer_mas` | `budget_file` |
 | `0003-dump-state.patch` | state snapshot after each of the 13 process calls | `state_file` |
 | `0004-dump-branches.patch` | the predicates the science branches on (gate 0) | `branch_file` |
+| `0005-unique-state-keys.patch` | per-step call counter + the gas-phase fields | `state_file` |
 
 Each dump is written only when its key is set to a non-empty path in
 `&box_run`, so the reference binary is a single build regardless of which

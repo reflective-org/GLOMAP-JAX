@@ -99,7 +99,17 @@ Two dumps, because neither is sufficient:
 
 * `budget_file` — the 283 per-process mass fluxes in `bud_aer_mas`;
 * `state_file` — `nd`, `mdt`, `md`, `drydp`, `wetdp`, `mdwat`, `rhopar` after
-  each of the thirteen calls, tagged `(imts, izts)`.
+  each of the thirteen calls, tagged `(step, seq, imts, izts)`, plus `h2so4`,
+  `delh2so4_nucl`, `sec_org` and `s_cond_s` at the nucleation call.
+
+Two things about that key are worth knowing, because both were wrong until the
+phase B review. `seq` is a per-step call counter and it is **load-bearing**:
+`calc_drydiam` and `volume_mode` each run twice per `imts`, so without it the
+key is not unique — a committed golden carried 397 keys with two different
+values, separable only by file row order. And the gas fields exist because
+`ukca_calcnucrate` writes no aerosol array at all, so its snapshot used to be a
+byte-for-byte copy of the preceding `conden` one; 21.7% of the dump was repeats,
+and a wrong nucleation rate would first have surfaced at `coagwithnucl`.
 
 Budgets carry **mass fluxes only** — no number, no diameters — so they cannot
 localise a divergence in coagulation or mode merging, which is exactly where

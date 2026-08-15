@@ -65,7 +65,14 @@ MODES: dict[str, tuple[str, tuple[str, ...]]] = {
 # Long-format streams: which columns are text (factorised) and which are numeric.
 LONG_SCHEMA: dict[str, tuple[tuple[str, ...], tuple[str, ...], str]] = {
     # mode: (text columns, integer columns, value column dtype)
-    "state": (("site", "field"), ("step", "imts", "izts", "imode", "icp"), "f8"),
+    # `seq` is the per-step call-sequence counter added by overlay 0005: without
+    # it (step, site, imts, izts, field, imode, icp) is NOT unique, because
+    # calc_drydiam and volume_mode each run twice per imts.
+    "state": (
+        ("site", "field"),
+        ("step", "seq", "imts", "izts", "imode", "icp"),
+        "f8",
+    ),
     "branches": (
         ("site", "tag"),
         ("step", "imts", "izts", "i1", "i2", "ibox"),
