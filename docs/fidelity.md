@@ -28,7 +28,7 @@ pass.
 
 `ukca_solvecoagnucl_v.F90:259` integrates `dN/dt = A·N²` as
 `1/(1/N − 3·A·Δt)`. The exact solution is `1/(1/N − A·Δt)`; there is no factor 3.
-The header at line 78 repeats the same error, so code and comment agree with
+The header at line 77 repeats the same error, so code and comment agree with
 each other and both disagree with the mathematics.
 
 **Reachable every substep.** In `ukca_coagwithnucl.F90:462` the top insoluble
@@ -119,7 +119,9 @@ so it will disagree with any setup-8 golden.
 composition to `mlo × mfrac_0`.
 
 Two things make it easy to get wrong. It is **ungated** — no `checkmd_nd`, no
-`iextra_checks` — and it runs four times per `nmts` step, making it the most
+`iextra_checks` — and it runs twice per `nmts` step (four times per
+`ukca_aero_step` call, five per chemistry step counting the box driver's own),
+making it the most
 frequently applied state mutation in the model. And it covers **modes 1–3 only**
 (`DO imode = mode_nuc_sol, mode_acc_sol`), not all eight.
 
@@ -145,8 +147,12 @@ behaviour while the flag claims otherwise.
 Registered against `ukca_vapour`, not `ukca_volume_mode`. In `volume_mode`
 (lines 882-898) it only adds a fatal `ereport` guard on negative `pvol_wat` or
 `mdwat` and has no numerical effect. Its actual numerical effect is in
-`ukca_vapour`, where it changes `wts = MIN(99.0, MAX(41.0, ws*100))` to
-`MAX(41.0, ws*100)` — which matters for the stratospheric density branch.
+`ukca_vapour`. With the flag **true** — the box model's setting — `:184` gives
+`wts = MIN(99.0, MAX(41.0, ws*100))`; the unfixed branch at `:188` is
+`MAX(41.0, ws*100)`, with no upper clamp. So `True` is the clamped form, which
+matters for the stratospheric density branch. (This entry previously named the
+two the wrong way round, which would have led a porter to implement the unfixed
+branch as the default.)
 
 Registering it against the wrong routine would make its default meaningless.
 
@@ -161,8 +167,12 @@ Registering it against the wrong routine would make its default meaningless.
 
 `ukca_check_md_nd` declares `nd`, `mdt` and `md` as `INTENT(IN)` and only prints
 and warns. It clamps nothing and redistributes nothing, so not porting it has
-zero effect on results. Verified, and asserted by a test that `checkmd_nd=1`
-gives bit-identical Fortran output to `checkmd_nd=0`.
+zero effect on results — an argument from the `INTENT(IN)` declarations, which
+is sound but is not a measurement.
+
+**No test asserts this yet.** An earlier version of this entry claimed one
+existed; it never did. Task 79 is where it lands: run the Fortran with
+`checkmd_nd=1` and `=0` and assert bit-identical output.
 
 ## `iextra_checks`
 

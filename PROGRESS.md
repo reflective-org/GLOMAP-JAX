@@ -22,7 +22,7 @@ Order 1 of 3 (faithful port). Task numbering follows the plan.
 Closed with an adversarial agent review, per the working practice. It found 20
 issues; the serious ones are fixed, the rest are filed (#6-#11).
 
-Fixed in `3dd6b0f`:
+Fixed in `b1d8f54`:
 
 * **The float64 justification was factually wrong**, repeated in five places
   including a test that could not fail. 1e-20 is a *normal* float32 number and
@@ -76,10 +76,10 @@ criterion asked for and which was missed at the time.
 **But 3.7e-4 is a setup-1 number, not a global one** (found at task 19, issue
 #14). Re-derived from the committed fixtures it is 3.7e-4 / 1.0e-3 / 2.9e-4 for
 the three `i_mode_setup = 1` cases and **0.80** for `marine_bcoc`, where ageing
-depletes the Aitken insoluble mode over four orders of magnitude and f32 loses
+depletes the Aitken insoluble mode over seven orders of magnitude and f32 loses
 the residual: `Ddry_aitins` collapses from 30 nm to 5.8 nm and `N_aitins` stops
 decaying and turns back upward. The branch dump shows this is cancellation and
-not a flipped predicate — only 60 of 107,664 branch records differ, all from
+not a flipped predicate — only 60 of 108,432 branch records differ, all from
 step 45, while the trajectory diverges continuously from step 20. First use of
 gate 0 to *exclude* a branch explanation, which is worth as much as confirming
 one. The f64 reference is well behaved throughout, so the port is unaffected.
@@ -105,7 +105,8 @@ once more from the driver.
 
 **Gate A reaches bit-identity (task 20).** The in-process binding, built from
 the *plain* vendored tree, reproduces the committed goldens — captured from the
-*fully patched* stage — to 0.0e+00 relative difference on every field. That is
+*fully patched* stage — to 0.0e+00 relative difference on every field compared,
+which is 15 of the trajectory's 39 columns on one row of one case. That is
 three confirmations in one: the wrapper's transcription of the driver is
 faithful, the `ES24.16` overlay round-trips float64 losslessly, and the four
 overlays really are instrumentation and not science. The meson/ninja blocker is
@@ -118,7 +119,7 @@ JAX, so the merge/no-merge flip the plan feared in `ukca_remode` cannot happen
 via erf. `log` and `1/x` are bit-identical too; `exp` differs by one ulp on 14%
 of points, inside tolerance. Task 34 shrinks to three specific rules, all now
 asserted: write the cube root as `x ** (1.0/3.0)` (`np.cbrt` disagrees on 94% of
-the grid by up to 1.3e-14), never use `jnp.round` (every `NINT` tie disagrees,
+the grid by up to 1.3e-14), never use `jnp.round` (64 of the 129 `NINT` ties disagree,
 and the live consumer indexes a lookup table), and `powr_v` takes a scalar
 exponent. Plus one hazard the plan did not have: **XLA flushes subnormal
 arithmetic results to zero** while gfortran does not (issue #15, latent).

@@ -170,7 +170,12 @@ wrong-width array arrives as a self-consistent pair and reaches Fortran
 unchallenged. The comparison against the module's own sizes inside each
 accessor is the only real check.
 
-**The binding reproduces the committed goldens bit for bit.** It is built from
+**The binding reproduces the committed goldens bit for bit, as far as it is
+compared.** The assertion is exact — `==`, not a tolerance — but it covers one
+chemistry step of one case (`marine_bcoc`) on `nd`, `drydp` and `rhopar`, i.e.
+15 of the trajectory's 39 columns and one of its 49 rows. Widening it to the
+mass and gas columns and to multiple steps is worth doing before phase C leans
+on it. It is built from
 the plain vendored tree while the goldens came from the fully patched stage, so
 that agreement says three things at once: the wrapper's transcription of the
 driver is faithful, the `ES24.16` overlay round-trips float64 without loss, and

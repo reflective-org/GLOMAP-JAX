@@ -27,7 +27,7 @@ Re-derived from the committed fixtures, the column-scaled f32-vs-f64 gap is
 `bl_nmts3` — all `i_mode_setup = 1`. For `marine_bcoc`, the only shipped case
 with an insoluble mode, it is **0.80**.
 
-Ageing depletes the Aitken insoluble mode over four orders of magnitude across
+Ageing depletes the Aitken insoluble mode over seven orders of magnitude across
 the run. In f64, number and mass leave in proportion and the mean dry diameter
 stays pinned near 30 nm while the number decays to 2e-5 cm⁻³. In f32 the
 residual loses significance, mass leaves faster than number, `Ddry_aitins`
@@ -35,7 +35,7 @@ collapses from 30 nm to 5.8 nm, and `N_aitins` stops decaying and turns back
 upward.
 
 **It is cancellation, not a flipped predicate**, and the branch dump is what
-makes that checkable rather than a hypothesis: of 107,664 branch records exactly
+makes that checkable rather than a hypothesis: of 108,432 branch records exactly
 60 differ between the variants, all `mask4` at `coag_insol_insol`, all from step
 45 onward — while the trajectory divergence is already visible at step 20 and is
 continuous. The flips are a late symptom of an already-diverged state.
@@ -168,8 +168,10 @@ root. Unreachable today (`dvol >= 0` wherever `cubrt_v` is called), but it is
 the failure a `cbrt` port would produce the first time it wasn't.
 
 **Do not use `jnp.round`.** Fortran `NINT` rounds half away from zero; numpy
-and JAX round half to even. Every tie in the grid disagrees, and away from ties
-they agree exactly — so a targeted shim suffices. The live consumer is
+and JAX round half to even. The grid holds 129 ties; **64 of them disagree and
+65 agree**, because the two rules coincide whenever rounding away from zero
+already lands on an even number (`-63.5 → -64` either way). Away from ties they
+agree exactly, so a targeted shim suffices. The live consumer is
 `ukca_vapour.F90:226`, `(NINT(wts/5))*5`, whose result *indexes a table*: at
 `wts ∈ {42.5, 52.5, 62.5, 72.5, 82.5, 92.5}` the naive version selects a
 different table entry, not a slightly different number.
@@ -186,8 +188,10 @@ compute it. A subnormal *constant* survives conversion untouched, which is what
 makes it easy to miss: the value is representable, it just cannot be produced.
 
 Latent rather than live — `num_eps` bottoms out at 1e-20 and
-`eps_d = eps_ab² = 1e-40`, both comfortably normal in float64 (they are not in
-float32, which is one more reason for ADR-001). Recorded because the failure it
+`eps_d = eps_ab² = 1e-40`, both comfortably normal in float64. Note in float32
+`1e-20` is *also* normal and `1e-40` is subnormal but non-zero — neither is
+flushed, so this is **not** an argument for ADR-001, whatever earlier drafts
+said. Recorded because the failure it
 would cause is a zero where the reference has a small positive number, feeding a
 `> eps` comparison, which separates trajectories by O(1) and would present as a
 gate-0 disagreement with no arithmetic explanation. Issue #15; re-measure on

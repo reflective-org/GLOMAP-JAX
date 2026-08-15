@@ -53,7 +53,8 @@ def check(goldens):
 # ADR-007: goldens are committed as plain files, no Git LFS. These are the
 # tripwires that re-open that decision, and they are deliberately loose -- they
 # exist to catch an order-of-magnitude change (a multi-box capture, say), not to
-# police a few hundred kilobytes. The full set measures 0.83 MB today.
+# police a few hundred kilobytes. All 21 archives total 1.03 MB today, of which
+# 0.78 MB is the sixteen f64 box-model streams.
 MAX_ARCHIVE_BYTES = 5_000_000
 MAX_TOTAL_BYTES = 25_000_000
 

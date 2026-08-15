@@ -146,7 +146,7 @@ def test_the_precision_floor_does_not_hold_for_a_depleting_insoluble_mode():
     """`marine_bcoc` is the only shipped case with an insoluble mode, and its
     f32 reference is quantitatively worthless by the end of the run.
 
-    Ageing depletes the Aitken insoluble mode over four orders of magnitude. In
+    Ageing depletes the Aitken insoluble mode over seven orders of magnitude. In
     f64, number and mass leave in proportion and the mean dry diameter stays
     pinned at 30 nm. In f32 the residual loses significance, mass leaves faster
     than number, the diameter collapses to 5.8 nm and `N_aitins` stops decaying

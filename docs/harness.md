@@ -40,7 +40,7 @@ agree on every predicate and still differ in the arithmetic between them.
 * it *confirmed* UP-1 fires every substep of every shipped namelist, for the top
   soluble mode, in the default setup — stronger than the defect note claimed;
 * it *excluded* a branch explanation for the `marine_bcoc` f32 divergence
-  (issue #14), where 60 of 107,664 records differ and all of them start 25 steps
+  (issue #14), where 60 of 108,432 records differ and all of them start 25 steps
   after the trajectory does. Ruling a hypothesis out is worth as much as
   confirming one;
 * it *measured* what the shipped fixtures never reach — half of
@@ -57,9 +57,11 @@ precision — no text file, no accumulated trajectory.
 Two shapes:
 
 * **whole-step** (`wrap_init`, `wrap_step`, accessors) — reproduces the
-  committed trajectory goldens *bit for bit*, which simultaneously validates the
-  binding, the `ES24.16` overlay's round-trip, and that the instrumentation
-  overlays really are instrumentation;
+  committed trajectory goldens *bit for bit* — exactly, not at a tolerance —
+  which simultaneously validates the binding, the `ES24.16` overlay's
+  round-trip, and that the instrumentation overlays really are instrumentation.
+  Note the comparison currently covers 15 of 39 columns on one row of one case;
+  the assertion is exact but narrow;
 * **leaf drivers** (`leaf_erf`, `leaf_cubrt`, …) — one entry point per routine,
   with the input grids in Python. This is the pattern for every per-routine
   fixture from phase C onwards.
@@ -97,7 +99,8 @@ error to one call; gate A opens the call up.
 ## Gate C — trajectory
 
 The committed `.npz` goldens: four cases × four streams in `f64`, plus the `f32`
-trajectory for the precision comparison. 21 archives, 1.1 MB, guarded by a
+trajectory for the precision comparison, and the numerics leaf sweep.
+21 archives totalling 1.03 MB, guarded by a
 content manifest.
 
 **Read the tolerance policy in `tests/conftest.py` before using this.** The

@@ -9,7 +9,20 @@ Reflective files these upstream, not the port. Issue
 
 Every entry below carries a title, a `file:line`, its reachability, its impact,
 and a **suggested patch** — enough to paste into a tracker without
-reconstructing the analysis. `tests/test_upstream_defects.py` fails if any of
+reconstructing the analysis.
+
+**Path note for whoever files these.** The diffs below use this repository's
+vendored layout, `src/ukca/<file>.F90`. Upstream the same files live at
+
+| here | `MetOffice/ukca` |
+|---|---|
+| `src/ukca/ukca_*.F90` | `src/science/core/aerosols/glomap/ukca_*.F90` |
+| `src/ukca/ereport_mod.F90` | `src/control/legacy/ereport_mod.F90` |
+
+so the diffs are illustrative of the change, not directly appliable upstream.
+They also elide surrounding comment lines in places. Re-generate against an
+upstream checkout before submitting anything as a patch rather than as a
+description. `tests/test_upstream_defects.py` fails if any of
 those five is missing, so a half-drafted entry cannot ship looking finished.
 Two of the suggested patches are already applied here, under
 `fortran/patches/`, because the reference is unusable without them; the rest are
@@ -63,13 +76,22 @@ coagulation for the top insoluble modes, so `B ≡ 0`, `C ≡ 0` and the
 discriminant is exactly zero. Intra-modal number decays three times too fast. It
 never blows up (`A < 0`), which is why it survived. KGO-changing upstream.
 
-**Measured, not only argued.** The branch dump (task 15b) records which closed
-form each element takes. The factor-3 branch runs on **every substep of every
-shipped namelist**, including the default 4-mode `i_mode_setup = 1` — and for
-the top *soluble* mode, not only the insoluble ones this note originally named.
-`mode_cor_sol` has no larger soluble mode to coagulate with and no nucleation
-source, so `B` and `C` are exactly zero there too. Every supported configuration
-has a largest soluble mode, so every supported configuration hits this.
+**Measured for the soluble modes, argued for the insoluble ones.** The branch
+dump (task 15b) records which closed form each element takes. The factor-3
+branch runs on **every substep of every shipped namelist**, including the
+default 4-mode `i_mode_setup = 1` — and for the top *soluble* mode, which this
+note originally did not mention at all. `mode_cor_sol` has no larger soluble
+mode to coagulate with and no nucleation source, so `B` and `C` are exactly zero
+there too. Every supported configuration has a largest soluble mode, so every
+supported configuration hits this.
+
+The insoluble half of the original claim remains **argued, not measured**: the
+only shipped case with an insoluble mode is `marine_bcoc`, whose single
+insoluble mode is `mode_ait_insol`, and `ukca_coagwithnucl.F90:462` is
+`IF (imode < mode_cor_insol)` — so it *does* take part in inter-modal
+coagulation and all 720 of its records are code 1, never code 5. Reaching code 5
+on an insoluble mode needs a setup with `mode_cor_insol` or `mode_sup_insol`
+active, which means `i_mode_setup = 8` and a fixture that does not exist yet.
 
 **Impact.** Intra-modal number decays three times too fast in every affected
 mode, on every substep. Measured with per-substep branch instrumentation: the
@@ -207,7 +229,7 @@ at `:256-262` and `:268-274`:
 ```
 
 **Secondary, and worth fixing in the same change.** `icoag` is never
-range-checked, and `kij` is pre-zeroed at `:239`, so an out-of-range value
+range-checked, and `kij` is pre-zeroed at `:237`, so an out-of-range value
 silently disables coagulation entirely rather than failing. An `ereport` for
 `icoag` outside `1..4` would turn a silent no-op into an error.
 

@@ -18,7 +18,7 @@ The measurements, over 15,382 points:
 | `exp` | 456/3199 differ, max 2.1e-16 (1 ulp) | within tolerance, but real |
 | `x ** (1/3)` | bit-identical | **this** is what `cubrt_v` computes |
 | `np.cbrt` | 1756/1865 differ, max 1.3e-14 | must not be used |
-| `NINT` | 64/642 differ — every tie | must not use `jnp.round` |
+| `NINT` | 64/642 differ — 64 of 129 ties | must not use `jnp.round` |
 
 No `fortran` marker: the golden is committed, so these run in CI. That matters
 more here than elsewhere — these are the assertions that stop someone reaching
@@ -177,7 +177,9 @@ def test_cbrt_and_the_power_form_disagree_about_negative_inputs(sweep):
 
 def test_round_half_to_even_is_wrong_for_this_code(sweep):
     """Fortran `NINT` rounds half away from zero; numpy and `jnp.round` round
-    half to even. Every one of the 64 ties in the grid disagrees.
+    half to even. The grid holds 129 ties, of which 64 disagree — the other 65
+    coincide, because rounding away from zero already lands on an even number
+    there (`-63.5 → -64` under both rules).
 
     `jnp.round` is the obvious thing to reach for and it is wrong here."""
     x, expected = sweep["nint_x"], sweep["nint_y"]
@@ -237,8 +239,9 @@ def test_jax_flushes_subnormal_results_to_zero_and_gfortran_does_not(sweep):
     **Latent, not live.** Nothing in GLOMAP is known to reach the float64
     subnormal range: `num_eps` bottoms out at 1e-20 and
     `eps_d = eps_ab**2 = 1e-40`, both comfortably normal in double precision.
-    (They are *not* in single precision, which is one more reason the port is
-    float64-only — see ADR-001.)
+    (In *single* precision 1e-20 is still normal and 1e-40 is subnormal but
+    non-zero, so neither is flushed there either — that is not a reason for
+    ADR-001, contrary to what earlier drafts claimed.)
 
     Pinned anyway, because the failure it would produce is a zero where the
     reference has a number, which then flows into a `> eps` comparison and

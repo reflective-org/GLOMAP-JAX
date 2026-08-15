@@ -7,11 +7,26 @@ decided, why, and what evidence would change it.
 
 **Decided.** `jax_enable_x64` is set once, in `src/glomap_jax/__init__.py`.
 
-This is correctness, not accuracy. `ukca_solvecoagnucl_v` selects among five
-closed-form solutions by comparing a discriminant against `eps_d = 1e-40`, and
-mode `num_eps` values reach `1e-20`. float32 flushes both to zero and **a
-different branch executes**. `carma-jax` reached the same conclusion
-independently for its own `SMALL_PC = 1e-50`.
+This is correctness, not accuracy — but **not for the reason first given
+here**. The original justification claimed float32 flushes `eps_d = 1e-40` and
+`num_eps = 1e-20` to zero so a different branch executes in
+`ukca_solvecoagnucl_v`. That is false: `1e-20` is a normal float32 number and
+`1e-40` is subnormal but non-zero, and running `ref-f32` and `ref-f64` against
+the branch dump gives **identical** form-code histograms. The phase A review
+recorded this claim as wrong; it survived here until the phase B review found
+it again.
+
+The real reasons are measured rather than argued:
+
+* **The f32 reference is a different trajectory, not a noisier one.** For
+  `marine_bcoc` the column-scaled f32-vs-f64 gap is **0.80** — ageing depletes
+  the Aitken insoluble mode over seven orders of magnitude, f32 loses the
+  residual, and `Ddry_aitins` collapses from 30 nm to 5.8 nm while `N_aitins`
+  stops decaying and turns back upward. Issue #14.
+* **The measured floor is 3.7e-4** even away from that, four orders of
+  magnitude above any tolerance worth gating on.
+* `carma-jax` reached the same conclusion independently for its own
+  `SMALL_PC = 1e-50`, where the underflow argument *does* hold.
 
 float32 is permitted only as an explicitly labelled benchmark mode.
 
@@ -99,9 +114,11 @@ Measured, at the namelists' own 48 steps:
 | budgets | 0.13 MB | |
 | state | 15.90 MB | |
 | branches | 3.82 MB | |
-| **total** | **19.89 MB** per case | **0.83 MB** for all four cases and all four modes |
+| **total** | **19.89 MB** for `marine_bcoc` | **0.78 MB** for all four cases and all four modes |
 
-A factor of about 96. Three things do the work, and all three are properties of
+A factor of about 99 measured across all four cases (76.8 MB of CSV against
+0.78 MB of `.npz`); the single-case row above is `marine_bcoc`, the largest.
+Three things do the work, and all three are properties of
 this data rather than of compression in general: the long-format dumps repeat a
 small vocabulary of `site`, `field` and `tag` labels over hundreds of thousands
 of rows, so factorising them into integer codes removes most of the bytes before

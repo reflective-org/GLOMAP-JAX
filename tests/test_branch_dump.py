@@ -23,8 +23,9 @@ records carry imts = izts = -1 so they cannot be mistaken for the tail of the
 step that just ran.
 
 What the shipped fixtures do NOT reach, which is itself a finding: of
-`ukca_solvecoagnucl_v`'s eight branch codes only 0, 1 and 5 occur; the TAN
-branch, both A == 0 branches and the error branch are unexercised, as are the
+`ukca_solvecoagnucl_v`'s eight branch codes only 0, 1, 5 and 7 occur — and 7
+exactly once, in `free_troposphere` at step 1, substep 1. The TAN branch, the
+error branch and the `A == 0, B /= 0` branch are unexercised, as are the
 MDCPNEW < 0 reset, the undersize diameter reset and every mode merge. Those need
 the synthetic branch sweep of task 64 -- they cannot be validated from a
 trajectory fixture, because a trajectory fixture never visits them.
