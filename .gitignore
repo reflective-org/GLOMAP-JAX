@@ -25,5 +25,11 @@ fortran/bin-ref-*/
 fortran/build-f2py/
 fortran/bin-build-f2py/
 validation/f2py/_build/
+
+# Fortran scratch units. gfortran implicitly connects an undefined unit number
+# and creates fort.<n> in the CWD; the ereport shim makes that reachable by
+# letting glomap_box_config_mod continue past a failed OPEN(NEWUNIT=). Ignored
+# so they cannot be committed again -- 14 of them were, in 4c84059.
+fort.[0-9]*
 fortran/TOOLCHAIN.txt
 .refstage/

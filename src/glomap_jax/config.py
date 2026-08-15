@@ -167,10 +167,13 @@ class FidelityConfig:
 
     # UP-10, found in the phase A review. ukca_conden.F90:372-387 gates
     # insoluble-mode condensation with num_eps indexed by the enclosing SOLUBLE
-    # mode rather than the insoluble mode being tested. num_eps spans twelve
-    # orders of magnitude across modes, so imode=mode_cor_sol (1e-14) gates
-    # mode_sup_insol (1e-20) -- wrong by 1e6. Changes results on i_mode_setup=8,
-    # the only supported setup with mode_sup_insol active.
+    # mode rather than the insoluble mode being tested. Only :377 is both wrong
+    # and reachable: num_eps(mode_acc_sol) = 1e-8 gates mode_acc_insol, whose
+    # own threshold is 1e-14, so condensation is suppressed by a factor of 1e6
+    # too strict. :372 and :382 are no-ops because the entries happen to be
+    # equal, and :387 is unreachable -- mode_sup_insol is active only in setups
+    # 12 and 13, neither of which the box model implements. Changes results on
+    # i_mode_setup=8, which has mode_acc_insol but NOT mode_sup_insol.
     conden_insol_num_eps_by_sol_mode: bool = True
 
     # Not a defect: ukca_calc_drydiam.F90:245-262 silently rewrites md/mdt for

@@ -307,43 +307,74 @@ larger question than a comment fix.
 
 ## UP-10 — insoluble-mode `num_eps` indexed by the soluble mode
 
-`ukca_conden.F90:372-387`:
+`ukca_conden.F90:372-387`, inside `DO imode = mode_nuc_sol, mode_cor_sol`:
 
 ```fortran
-372:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_ait_insol) > num_eps(imode) )
-377:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_acc_insol) > num_eps(imode) )
-382:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_cor_insol) > num_eps(imode) )
-387:  mask4i(:) = mask2(:) .AND. ( nd(:,mode_sup_insol) > num_eps(imode) )
+372:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_ait_insol) > num_eps(imode) )   ! imode = 2
+377:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_acc_insol) > num_eps(imode) )   ! imode = 3
+382:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_cor_insol) > num_eps(imode) )   ! imode = 4
+387:  mask4i(:) = mask2(:) .AND. ( nd(:,mode_sup_insol) > num_eps(imode) )   ! imode = 4
 ```
 
 `imode` is the **soluble** mode of the enclosing loop; the threshold should
-belong to the insoluble mode being tested. `num_eps` spans twelve orders of
-magnitude across modes (`[1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]`,
-`ukca_mode_setup.F90:395`), so `imode = mode_cor_sol` (1e-14) gates
-`mode_sup_insol` (1e-20) — a threshold wrong by 10⁶.
+belong to the insoluble mode being tested. Contrast `:366`, which correctly uses
+`num_eps(imode)` for `nd(:,imode)`.
 
-Contrast `:366`, which correctly uses `num_eps(imode)` for `nd(:,imode)`.
+Whether that matters depends entirely on which pair of `num_eps` entries the
+substitution lands on. For `i_mode_setup = 8` they are
 
-**Changes results on `i_mode_setup = 8`**, the only supported setup with
-`mode_sup_insol` active. Found during the phase A review; reproduced behind
-`conden_insol_num_eps_by_sol_mode`.
+```
+num_eps = [1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]
+mode      nuc   ait   acc   cor    ait   acc    cor    sup
+          <------ soluble ------>  <------ insoluble ------>
+```
 
-**Impact.** **Changes results on `i_mode_setup = 8`**, the only supported setup
-with `mode_sup_insol` active. `num_eps` spans twelve orders of magnitude across
-modes, so the threshold applied to the super-coarse insoluble mode is wrong by a
-factor of 10⁶ — condensation onto that mode is gated by a number concentration
-threshold belonging to a different mode entirely.
+so only **one of the four lines is both wrong and reachable**:
 
-**Suggested patch.**
+| line | tests mode | uses `num_eps` | should use | effect |
+|---|---|---|---|---|
+| `:372` | 5 ait_insol | `(2)` = 1e-8 | `(5)` = 1e-8 | **none** — equal |
+| `:377` | 6 acc_insol | `(3)` = 1e-8 | `(6)` = 1e-14 | **10⁶ too strict** |
+| `:382` | 7 cor_insol | `(4)` = 1e-14 | `(7)` = 1e-14 | **none** — equal |
+| `:387` | 8 sup_insol | `(4)` = 1e-14 | `(8)` = 1e-20 | 10⁶ too strict, but **unreachable** |
+
+**`:377` is the live defect.** The threshold is six orders of magnitude too
+high, so condensation onto the accumulation-insoluble mode is **suppressed**
+whenever `1e-14 < nd(acc_insol) <= 1e-8` — a range the mode occupies while it
+is being depleted by ageing. Suppressed condensation means no contribution to
+`ageterm1`, so it also feeds back into the ageing rate.
+
+**`:387` cannot be reached by any supported configuration.** `mode_sup_insol`
+is active only where `mode_choice(8) = 1`, which is true of exactly two setups —
+12 (`sussbcocduntnh_8mode_8cpt`) and 13 (`sussbcocdump_8mode`). Setup 8 is
+`i_sussbcocdu_7mode`, `mode_choice = [1,1,1,1,1,1,1,0]`: seven modes, and mode 8
+is **off**. Neither 12 nor 13 is implemented by `glomap_box_config_mod`'s
+`init_indices`, so there is no reference driver that can exercise `:387` at all.
+Confirmed empirically: `mask4i` is false in all 14,400 records across the four
+committed branch-dump goldens.
+
+**Impact.** **Changes results on `i_mode_setup = 8`**, via `:377` — the only
+supported setup with `mode_acc_insol` active alongside `mode_acc_sol`. The other
+three lines are a latent trap rather than a live error: two are exact no-ops
+today only because two `num_eps` entries happen to be equal, and would become
+live the moment a setup gave them different values.
+
+**Suggested patch.** Fix all four, not only the one that currently bites — the
+no-ops are no-ops by coincidence:
 
 ```diff
 --- a/src/ukca/ukca_conden.F90
 +++ b/src/ukca/ukca_conden.F90
--      mask3i(:) = mask2(:) .AND. ( nd(:,mode_ait_insol) > num_eps(imode) )
-+      mask3i(:) = mask2(:) .AND. &
-+                  ( nd(:,mode_ait_insol) > num_eps(mode_ait_insol) )
+-          mask3i(:) = mask2(:) .AND. ( nd(:,mode_acc_insol) > num_eps(imode) )
++          mask3i(:) = mask2(:) .AND.                                           &
++                      ( nd(:,mode_acc_insol) > num_eps(mode_acc_insol) )
 ```
 
-and the same substitution at `:377` (`mode_acc_insol`), `:382`
-(`mode_cor_insol`) and `:387` (`mode_sup_insol`). Compare `:366`, which already
-uses `num_eps(imode)` correctly for `nd(:,imode)`.
+and the analogous substitution at `:372` (`mode_ait_insol`), `:382`
+(`mode_cor_insol`) and `:387` (`mode_sup_insol`).
+
+**History.** Found during the phase A review. The original write-up named `:387`
+and `i_mode_setup = 8` as the mechanism, which the phase B review showed to be
+wrong on both counts — `mode_sup_insol` is not active in setup 8, and `:387` is
+unreachable. The defect is real; the analysis was not. Corrected here and in
+`docs/fidelity.md`.

@@ -81,21 +81,34 @@ but no `nucl_only`.
 the phase A adversarial review and absent from the original plan.
 
 `ukca_conden.F90:372-387` gates condensation onto each insoluble mode with
-`num_eps` indexed by the enclosing **soluble** mode:
+`num_eps` indexed by the enclosing **soluble** mode rather than the insoluble
+mode being tested. Line 366 in the same routine uses `num_eps(imode)` correctly
+for `nd(:,imode)`, which is what makes this look like a copy-paste slip rather
+than intent.
+
+Whether it matters depends on which pair of `num_eps` entries each line lands
+on. With `num_eps = [1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]`, only
+`:377` is both wrong and reachable:
 
 ```fortran
-mask4i(:) = mask2(:) .AND. ( nd(:,mode_sup_insol) > num_eps(imode) )
+mask3i(:) = mask2(:) .AND. ( nd(:,mode_acc_insol) > num_eps(imode) )  ! imode = 3
 ```
 
-`num_eps` spans twelve orders of magnitude across modes
-(`[1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]`), so with
-`imode = mode_cor_sol` the super-coarse insoluble mode is gated at `1e-14`
-instead of its own `1e-20` — wrong by a factor of 10⁶. Line 366 in the same
-routine uses `num_eps(imode)` correctly for `nd(:,imode)`, which is what makes
-this look like a copy-paste slip rather than intent.
+`num_eps(3) = 1e-8` where `num_eps(mode_acc_insol) = 1e-14` belongs — six orders
+of magnitude too **strict**, so condensation onto the accumulation-insoluble
+mode is suppressed while `1e-14 < nd <= 1e-8`. `:372` and `:382` are exact
+no-ops because the two entries happen to be equal; `:387` is unreachable,
+because `mode_sup_insol` is active only in setups 12 and 13 and neither is
+implemented by the box model.
 
-**Changes results on `i_mode_setup = 8`**, the only supported setup with
-`mode_sup_insol` active — and one the done-criteria require.
+**Changes results on `i_mode_setup = 8`** — via `:377`, the accumulation pair.
+Setup 8 is `sussbcocdu_7mode`, `mode_choice = [1,1,1,1,1,1,1,0]`: it has
+`mode_acc_insol` but **not** `mode_sup_insol`.
+
+**Testability.** Both settings are distinguishable only on a setup with an
+insoluble accumulation mode, i.e. setup 8 among those supported. Setting `False`
+lowers the threshold to `1e-14` and admits condensation the Fortran suppresses,
+so it will disagree with any setup-8 golden.
 
 ## `drydiam_undersize_reset`
 

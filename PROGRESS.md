@@ -33,7 +33,9 @@ Fixed in `3dd6b0f`:
 * **"nbudaer takes eight distinct values"** — seven.
 * **UP-10 confirmed and was missing entirely**: `ukca_conden.F90:372-387` gates
   insoluble-mode condensation with `num_eps` indexed by the *soluble* mode,
-  wrong by 1e6 and results-changing on setup 8.
+  wrong by 1e6 and results-changing on setup 8. (The phase B review later
+  corrected the mechanism: the live line is `:377`, not `:387`, and setup 8 does
+  not have `mode_sup_insol` active at all.)
 * **`docs/UPSTREAM_DEFECTS.md` was an empty stub** that shipped code cited, and
   `PROVENANCE.md` claimed the defects were "reported upstream" when they are
   drafted and unfiled.
