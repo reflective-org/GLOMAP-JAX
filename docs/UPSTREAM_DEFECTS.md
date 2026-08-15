@@ -1,7 +1,7 @@
 # Upstream UKCA defects
 
-Ten defects found in `MetOffice/ukca` @ `387c5bb` while building the reference
-box model and planning this port.
+Eleven defects found in `MetOffice/ukca` @ `387c5bb` while building the
+reference box model and planning this port.
 
 **Status: drafted and submission-ready, not yet filed.** By decision,
 Reflective files these upstream, not the port. Issue
@@ -54,6 +54,7 @@ disposition cannot be claimed here and quietly not exist in the code.
 | UP-8 | `ereport_mod.F90:50` | standalone harnesses only | `harness-patch: 0002-ereport-nonzero-exit-status.patch` |
 | UP-9 | `ukca_conden.F90:52-53` | documentation only | `documentation-only` |
 | UP-10 | `ukca_conden.F90:372-387` | **changes results on setup 8** | `fidelity-flag: conden_insol_num_eps_by_sol_mode` |
+| UP-11 | `ukca_volume_mode.F90:856-877` | diagnostic unusable when it fires | `diagnostic-only` |
 
 What each disposition means, and what the test checks:
 
@@ -64,6 +65,7 @@ What each disposition means, and what the test checks:
 | `not-implemented` | the affected feature has no correct reference to validate against, so the port refuses it | recorded in `docs/unsupported.md` |
 | `harness-patch: F` | the reference itself is unusable without a fix; carried as a patch to the vendored tree | `fortran/patches/F` exists |
 | `documentation-only` | a comment or header disagrees with the code; the code is right | no code action; the entry says which to trust |
+| `diagnostic-only` | affects only a print/abort path the port does not reproduce (ADR-006) | no code action; the entry says why the port is unaffected |
 
 ## UP-1 — spurious factor 3 in the `dN/dt = A·N²` branch
 
@@ -405,3 +407,56 @@ and `i_mode_setup = 8` as the mechanism, which the phase B review showed to be
 wrong on both counts — `mode_sup_insol` is not active in setup 8, and `:387` is
 unreachable. The defect is real; the analysis was not. Corrected here and in
 `docs/fidelity.md`.
+
+## UP-11 — the negative-size diagnostic overflows its own buffer
+
+`ukca_volume_mode.F90:856-877` builds the message for the
+`wetdp`/`drydp`/`wvol`/`dvol`/`rhopar` `<= 0` abort:
+
+```fortran
+WRITE(cmessage,'(5(A,E15.6,A,I0),A)')                                      &
+     'Minimum value of "wetdp" or "drydp" or "wvol"' //newline//           &
+     ...five MINVAL/MINLOC blocks...                                       &
+     'Further debugging output in stdout.'
+```
+
+`cmessage` is `CHARACTER(LEN=errormessagelength)` and
+`errormessagelength_mod.F90:32` sets that to **256**. The assembled text is
+roughly **412** characters: two header lines of ~85, five blocks of ~58
+(`'MINVAL(x(:,imode)) : '` + `E15.6` + `' at location : '` + `I0` + newline),
+and a 35-character trailer.
+
+**Trust the code.** The intent is clear from the message; the buffer is what is
+wrong.
+
+**Impact.** Writing past the record length of an internal file raises
+`Fortran runtime error: End of record`, which aborts **before** `ereport` is
+reached. So the branch never produces the diagnostic it was written to produce:
+a run that hits a non-positive diameter or density dies with a message about
+record lengths instead of the five `MINVAL`/`MINLOC` values someone went to
+real trouble to assemble. The whole block is effectively dead code, and it is
+dead exactly when it is most needed.
+
+Found while testing the gate-A `ereport` shim: with the shim making the abort
+non-fatal, driving a mode to zero mass reaches this `WRITE` and kills the
+process anyway — with the shim's own diagnostic never printed either.
+
+**Why the port is unaffected.** ADR-006: diagnostic and consistency routines
+are recorded as deliberately not ported, and the port has no fixed-length
+message buffers. Nothing to reproduce.
+
+**Suggested patch.** Widen the buffer at the point of use rather than raising
+`errormessagelength` globally, which many other routines depend on:
+
+```diff
+--- a/src/ukca/ukca_volume_mode.F90
++++ b/src/ukca/ukca_volume_mode.F90
+-CHARACTER(LEN=errormessagelength) :: cmessage
++! The negative-size diagnostic assembles ~412 characters; errormessagelength
++! is 256, and overflowing an internal-file record aborts before ereport runs.
++CHARACTER(LEN=1024) :: cmessage
+```
+
+Alternatively split it into several `umPrint` calls and pass `ereport` a short
+summary, which is what the trailing "Further debugging output in stdout"
+suggests was intended.

@@ -95,6 +95,7 @@ def test_every_disposition_is_one_of_the_five_kinds(defect):
         "not-implemented",
         "harness-patch",
         "documentation-only",
+        "diagnostic-only",
     }, f"{defect}: unknown disposition {disposition!r}"
 
 
@@ -246,7 +247,8 @@ def test_a_not_implemented_defect_is_recorded_as_unsupported(defect):
 
 
 @pytest.mark.parametrize(
-    "defect", [d for d, x in DISPOSITIONS.items() if x == "documentation-only"]
+    "defect",
+    [d for d, x in DISPOSITIONS.items() if x in ("documentation-only", "diagnostic-only")],
 )
 def test_a_documentation_only_defect_says_which_source_to_trust(defect):
     """'The header and the code disagree' is useless to a porter without the
