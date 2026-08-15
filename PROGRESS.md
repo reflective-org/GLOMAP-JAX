@@ -64,7 +64,8 @@ Fixed in `b1d8f54`:
 | 21 | Leaf reference-driver pattern + numerics driver | `efd13e7` |
 | 22 | Document the harness; record all upstream defects | `a1c3859` |
 | 23 | Draft the upstream write-ups for Ali to file | `9ed31fa` |
-| 20b | `ereport` shim + one-process-per-setup harness | this commit |
+| 20b | `ereport` shim + one-process-per-setup harness | `4c84059` |
+| — | **Phase B adversarial review**, findings applied | `b53b871`…`2f8c1d4` |
 
 **Measured precision floor: 3.7e-4** over a 48-step run — not the ~1e-6 the plan
 assumed, roughly 370x larger. So `ref-f32` is useless as a validation target for
