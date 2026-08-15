@@ -60,6 +60,14 @@ echo "==> 1/2  building the vendored sources (-fdefault-real-8, -fPIC)"
 make -C "$FORTRAN" BUILD="$BUILD" BIN="bin-$BUILD" \
      FCFLAGS="$FCFLAGS -J $BUILD -I $BUILD" >/dev/null
 
+# Stage 1 also links $(BIN)/glomap_box. On a REBUILD, make finds the shimmed
+# ereport_mod.o newer than its source, does not rebuild it, and relinks the
+# executable with the shim inside -- producing a box model that prints
+# "UKCA ERROR (shim, not fatal)" and writes a complete CSV anyway,
+# indistinguishable at a glance from fortran/bin/glomap_box. Nothing here
+# needs it, so it goes.
+rm -rf "$FORTRAN/bin-$BUILD"
+
 echo "==> 2/2  compiling the state module, then f2py on the wrapper only"
 # The state module holds the derived-type box state. f2py is never handed it:
 # f90mod_rules would try to expose TYPE(box_env_type) and abort with

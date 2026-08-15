@@ -85,8 +85,25 @@ stage_tree() {
 verify_additive_for_ukca() {
   # Reject a patch that removes any line from a file under src/ukca/.
   local patchfile="$1"
+  # Both --- and +++ are inspected, and the path is normalised first. The phase
+  # B review found two ways past a check that looked only at +++ verbatim:
+  # `+++ b/src/box/../ukca/ukca_conden.F90` is applied by `patch -p1` to
+  # src/ukca/ but does not match the pattern, and a file deletion puts
+  # /dev/null on +++ with the UKCA path on ---.
   awk -v name="$(basename "$patchfile")" '
-    /^\+\+\+ / { in_ukca = ($2 ~ /src\/ukca\//) ; next }
+    function norm(p,   out, n, i, parts, stack, top) {
+      n = split(p, parts, "/"); top = 0
+      for (i = 1; i <= n; i++) {
+        if (parts[i] == "." || parts[i] == "") continue
+        if (parts[i] == "..") { if (top > 0) top--; continue }
+        stack[++top] = parts[i]
+      }
+      out = ""
+      for (i = 1; i <= top; i++) out = out "/" stack[i]
+      return out
+    }
+    /^--- / { from = norm($2) ; next }
+    /^\+\+\+ / { in_ukca = (norm($2) ~ /src\/ukca\// || from ~ /src\/ukca\//) ; next }
     in_ukca && /^-/ && !/^---/ {
       printf "ERROR: %s removes a line from src/ukca/: %s\n", name, $0 > "/dev/stderr"
       bad = 1

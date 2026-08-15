@@ -35,6 +35,25 @@ is attributable to a specific flipped predicate rather than to "precision".
 **What it cannot catch:** anything that is not a branch. Two implementations can
 agree on every predicate and still differ in the arithmetic between them.
 
+**One mask needs a masked comparison.** `coagwithnucl`'s `mask4` is
+`ABS(-bterm*dtz) > 1e-3`, and `bterm` is written only under
+`IF (interoff /= 1)` → `WHERE (mask2)`. Where `mask2` is false the science never
+uses `mask4`, but `bterm` still holds the *previous* `jmode`'s value, so the
+dump records a `mask4` derived from it. That is faithful — it is exactly what
+the Fortran computed — but a port evaluating `mask4` per mode-pair would record
+something different and gate 0 would report a disagreement with no consequence.
+
+**So compare `mask4` only where `mask2` is true.** The dump deliberately emits
+both, unmasked, rather than emitting `mask4 .AND. mask2`: recording the raw
+value keeps the stale-`bterm` behaviour visible, which is worth more than a
+tidier comparison. Zero occurrences in the committed goldens today; it fires
+the first time a mode's `ndold` crosses `num_eps` partway through a `jmode`
+loop.
+
+Two related masks read the other way: `sqd_clamp` and `tan_pole` *are* emitted
+masked, so a `0` there means "not evaluated" or "evaluated false" and the
+`form` code is what disambiguates.
+
 **Already earned its keep**, in both directions:
 
 * it *confirmed* UP-1 fires every substep of every shipped namelist, for the top

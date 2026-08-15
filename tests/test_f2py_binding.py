@@ -453,6 +453,16 @@ def test_no_overlay_touches_ereport():
     build_f2py = (REPO / "validation" / "build_f2py.sh").read_text(encoding="utf-8")
     assert "glomap_ereport_shim.F90" in build_f2py, "the shim is not built at all"
 
+    # Stage 1 of build_f2py.sh links its own glomap_box, and on a rebuild make
+    # relinks it against the already-shimmed object -- leaving a runnable box
+    # model that continues past fatal errors, indistinguishable at a glance
+    # from fortran/bin/glomap_box. The script deletes it; check it stays gone.
+    shimmed = REPO / "fortran" / "bin-build-f2py"
+    assert not shimmed.exists(), (
+        f"{shimmed} exists and holds a glomap_box linked against the ereport "
+        f"shim; build_f2py.sh should have removed it"
+    )
+
 
 @needs_binding
 def test_the_reference_binary_still_dies_on_a_fatal_error():
