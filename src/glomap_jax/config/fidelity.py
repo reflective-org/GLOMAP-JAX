@@ -74,6 +74,10 @@ class FidelityConfig:
     # equal, and :387 is unreachable -- mode_sup_insol is active only in setups
     # 12 and 13, neither of which the box model implements. Changes results on
     # i_mode_setup=8, which has mode_acc_insol but NOT mode_sup_insol.
+    # LATENT, not live: :377 is gated by topmode > mode_ait_insol, and topmode
+    # is 5 unless l_dust_mp_ageing is set. Force it on with setup 8 and the mask
+    # is still false -- init_state puts nd(mode_acc_insol) at exactly 1e-14 and
+    # the test is strictly greater. No both-settings test is possible yet.
     conden_insol_num_eps_by_sol_mode: bool = True
 
     # Not a defect: ukca_calc_drydiam.F90:245-262 silently rewrites md/mdt for

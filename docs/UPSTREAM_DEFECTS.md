@@ -22,19 +22,23 @@ vendored layout, `src/ukca/<file>.F90`. Upstream the same files live at
 so the diffs are illustrative of the change, not directly appliable upstream.
 They also elide surrounding comment lines in places. Re-generate against an
 upstream checkout before submitting anything as a patch rather than as a
-description. `tests/test_upstream_defects.py` fails if any of
-those five is missing, so a half-drafted entry cannot ship looking finished.
-Two of the suggested patches are already applied here, under
-`fortran/patches/`, because the reference is unusable without them; the rest are
-proposals, and **UP-3's is deliberately argued against** in its own entry. Two are
-carried as patches to the vendored tree because the reference is unusable
-without them; four are reproduced faithfully behind fidelity flags (see
-[fidelity.md](fidelity.md)); the remaining four need no code action, for
-reasons the disposition table below makes explicit.
+description.
 
-Each entry states **reachability** explicitly, because six of the ten are
-latent, config-gated or diagnostic-only, and conflating those with
-"changes results" misdirects both upstream and the port.
+`tests/test_upstream_defects.py` fails if any of those five elements is missing,
+so a half-drafted entry cannot ship looking finished.
+
+Two of the suggested patches are already applied to the vendored tree, under
+`fortran/patches/`, because the reference is unusable without them. Four are
+reproduced faithfully behind fidelity flags (see [fidelity.md](fidelity.md)).
+The rest need no code action, for reasons the disposition table below makes
+explicit — and **UP-3's suggested patch is deliberately argued against** in its
+own entry.
+
+Each entry states **reachability** explicitly, because eight of the eleven are
+latent, config-gated, diagnostic-only or documentation-only, and conflating
+those with "changes results" misdirects both upstream and the port. UP-10 is the
+cautionary case: it was filed twice as results-changing before measurement
+showed it latent.
 
 Each also states a **disposition**: what the port does about it. Not every
 defect earns a fidelity flag — a flag is for a defect the port must *choose* to
@@ -53,7 +57,7 @@ disposition cannot be claimed here and quietly not exist in the code.
 | UP-7 | `ukca_aero_step.F90:1022-1023` | fatal under bounds checking | `harness-patch: 0001-guard-msec_org-zero-index.patch` |
 | UP-8 | `ereport_mod.F90:50` | standalone harnesses only | `harness-patch: 0002-ereport-nonzero-exit-status.patch` |
 | UP-9 | `ukca_conden.F90:52-53` | documentation only | `documentation-only` |
-| UP-10 | `ukca_conden.F90:372-387` | **changes results on setup 8** | `fidelity-flag: conden_insol_num_eps_by_sol_mode` |
+| UP-10 | `ukca_conden.F90:372-387` | latent; needs dust ageing + setup 8 + a specific `nd` | `fidelity-flag: conden_insol_num_eps_by_sol_mode` |
 | UP-11 | `ukca_volume_mode.F90:856-877` | diagnostic unusable when it fires | `diagnostic-only` |
 
 What each disposition means, and what the test checks:
@@ -336,60 +340,58 @@ larger question than a comment fix.
 
 ## UP-10 — insoluble-mode `num_eps` indexed by the soluble mode
 
-`ukca_conden.F90:372-387`, inside `DO imode = mode_nuc_sol, mode_cor_sol`:
+`ukca_conden.F90:372-387`, inside `DO imode = mode_nuc_sol, mode_cor_sol`, gates
+condensation onto each insoluble mode with `num_eps` indexed by the enclosing
+**soluble** mode rather than the insoluble mode being tested. Contrast `:366`,
+which correctly uses `num_eps(imode)` for `nd(:,imode)`. It looks like a
+copy-paste slip, and almost certainly is one.
 
-```fortran
-372:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_ait_insol) > num_eps(imode) )   ! imode = 2
-377:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_acc_insol) > num_eps(imode) )   ! imode = 3
-382:  mask3i(:) = mask2(:) .AND. ( nd(:,mode_cor_insol) > num_eps(imode) )   ! imode = 4
-387:  mask4i(:) = mask2(:) .AND. ( nd(:,mode_sup_insol) > num_eps(imode) )   ! imode = 4
-```
+**Whether it can do anything is a longer question than it appears, and this
+entry has been wrong about it twice.** Three conditions have to line up.
 
-`imode` is the **soluble** mode of the enclosing loop; the threshold should
-belong to the insoluble mode being tested. Contrast `:366`, which correctly uses
-`num_eps(imode)` for `nd(:,imode)`.
+**1. The `topmode` gate.** Three of the four lines carry
+`.AND. (topmode > mode_ait_insol)`. `topmode` is not the highest active mode —
+`ukca_mode_setup.F90:418-422` sets it to `nmodes` when `l_dust_mp_ageing` and to
+`mode_ait_insol` (5) otherwise. The box model defaults that switch **off**, so
+`topmode = 5` and `5 > 5` is false:
 
-Whether that matters depends entirely on which pair of `num_eps` entries the
-substitution lands on. For `i_mode_setup = 8` they are
+| line | tests mode | gated by `topmode`? | reachable by default? |
+|---|---|---|---|
+| `:372` | 5 ait_insol | no | **yes** |
+| `:377` | 6 acc_insol | yes | no |
+| `:382` | 7 cor_insol | yes | no |
+| `:387` | 8 sup_insol | yes | no |
 
-```
-num_eps = [1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]
-mode      nuc   ait   acc   cor    ait   acc    cor    sup
-          <------ soluble ------>  <------ insoluble ------>
-```
+**2. The thresholds have to differ.** With
+`num_eps = [1e-8, 1e-8, 1e-8, 1e-14, 1e-8, 1e-14, 1e-14, 1e-20]`:
 
-so only **one of the four lines is both wrong and reachable**:
+| line | uses | should use | differs? |
+|---|---|---|---|
+| `:372` | `(2)` = 1e-8 | `(5)` = 1e-8 | **no — exact no-op** |
+| `:377` | `(3)` = 1e-8 | `(6)` = 1e-14 | yes, 10⁶ too strict |
+| `:382` | `(4)` = 1e-14 | `(7)` = 1e-14 | no |
+| `:387` | `(4)` = 1e-14 | `(8)` = 1e-20 | yes, but mode 8 is never active |
 
-| line | tests mode | uses `num_eps` | should use | effect |
-|---|---|---|---|---|
-| `:372` | 5 ait_insol | `(2)` = 1e-8 | `(5)` = 1e-8 | **none** — equal |
-| `:377` | 6 acc_insol | `(3)` = 1e-8 | `(6)` = 1e-14 | **10⁶ too strict** |
-| `:382` | 7 cor_insol | `(4)` = 1e-14 | `(7)` = 1e-14 | **none** — equal |
-| `:387` | 8 sup_insol | `(4)` = 1e-14 | `(8)` = 1e-20 | 10⁶ too strict, but **unreachable** |
+So the only line that is both reachable by default and wrong is — none. The one
+line that runs is the one where the two thresholds happen to be equal.
 
-**`:377` is the live defect.** The threshold is six orders of magnitude too
-high, so condensation onto the accumulation-insoluble mode is **suppressed**
-whenever `1e-14 < nd(acc_insol) <= 1e-8` — a range the mode occupies while it
-is being depleted by ageing. Suppressed condensation means no contribution to
-`ageterm1`, so it also feeds back into the ageing rate.
+**3. Even with the gate open, `nd` has to land in the window.** Forcing
+`l_dust_mp_ageing = .TRUE.` (giving `topmode = 8`) on setup 8 opens `:377`, and
+the mask is *still* false throughout: `init_state` puts `nd(mode_acc_insol)` at
+exactly `1e-14`, its own `num_eps`, and the test is `nd > num_eps` — strictly
+greater. So both the wrong threshold (1e-8) and the right one (1e-14) give
+false. Measured over 138 samples: 0 inside `(1e-14, 1e-8]`.
 
-**`:387` cannot be reached by any supported configuration.** `mode_sup_insol`
-is active only where `mode_choice(8) = 1`, which is true of exactly two setups —
-12 (`sussbcocduntnh_8mode_8cpt`) and 13 (`sussbcocdump_8mode`). Setup 8 is
-`i_sussbcocdu_7mode`, `mode_choice = [1,1,1,1,1,1,1,0]`: seven modes, and mode 8
-is **off**. Neither 12 nor 13 is implemented by `glomap_box_config_mod`'s
-`init_indices`, so there is no reference driver that can exercise `:387` at all.
-Confirmed empirically: `mask4i` is false in all 14,400 records across the four
-committed branch-dump goldens.
+**Impact.** Latent in every configuration reachable from the box model. To fire
+it needs `l_dust_mp_ageing = .TRUE.`, **and** `i_mode_setup = 8`, **and** an
+initial condition or evolution putting `nd(mode_acc_insol)` strictly inside
+`(1e-14, 1e-8]`. That is constructible, and a UM configuration with dust
+microphysical ageing enabled may well reach it — which is why it is still worth
+reporting — but nothing in this repository can currently demonstrate it.
 
-**Impact.** **Changes results on `i_mode_setup = 8`**, via `:377` — the only
-supported setup with `mode_acc_insol` active alongside `mode_acc_sol`. The other
-three lines are a latent trap rather than a live error: two are exact no-ops
-today only because two `num_eps` entries happen to be equal, and would become
-live the moment a setup gave them different values.
-
-**Suggested patch.** Fix all four, not only the one that currently bites — the
-no-ops are no-ops by coincidence:
+**Suggested patch.** Fix all four regardless. Two are no-ops only by coincidence
+of equal `num_eps` entries, and would become live the moment a setup gave them
+different values:
 
 ```diff
 --- a/src/ukca/ukca_conden.F90
@@ -399,14 +401,17 @@ no-ops are no-ops by coincidence:
 +                      ( nd(:,mode_acc_insol) > num_eps(mode_acc_insol) )
 ```
 
-and the analogous substitution at `:372` (`mode_ait_insol`), `:382`
-(`mode_cor_insol`) and `:387` (`mode_sup_insol`).
+and the analogous substitution at `:372`, `:382` and `:387`.
 
-**History.** Found during the phase A review. The original write-up named `:387`
-and `i_mode_setup = 8` as the mechanism, which the phase B review showed to be
-wrong on both counts — `mode_sup_insol` is not active in setup 8, and `:387` is
-unreachable. The defect is real; the analysis was not. Corrected here and in
-`docs/fidelity.md`.
+**History — two corrections, both from over-claiming.** The phase A write-up
+said "changes results on `i_mode_setup = 8`, the only supported setup with
+`mode_sup_insol` active", built on `:387`; the phase B review showed mode 8 is
+*not* active in setup 8 and `:387` is unreachable, and re-pointed the entry at
+`:377`. Capturing the mode tables for task 24 then showed `:377` is gated off by
+`topmode` in the default configuration, and false anyway when the gate is
+opened. Each correction moved the claim further from "changes results" toward
+"latent", and each time the error was asserting reachability without measuring
+it. The defect is real; every impact claim made about it so far has not been.
 
 ## UP-11 — the negative-size diagnostic overflows its own buffer
 

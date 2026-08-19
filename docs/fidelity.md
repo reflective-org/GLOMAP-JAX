@@ -101,14 +101,27 @@ no-ops because the two entries happen to be equal; `:387` is unreachable,
 because `mode_sup_insol` is active only in setups 12 and 13 and neither is
 implemented by the box model.
 
-**Changes results on `i_mode_setup = 8`** — via `:377`, the accumulation pair.
-Setup 8 is `sussbcocdu_7mode`, `mode_choice = [1,1,1,1,1,1,1,0]`: it has
-`mode_acc_insol` but **not** `mode_sup_insol`.
+**Latent, not live** — a third revision of this claim, and the reason is in
+`docs/UPSTREAM_DEFECTS.md`. `:377` is gated by `topmode > mode_ait_insol`, and
+`topmode` is 5 unless `l_dust_mp_ageing` is set, so the line does not run in the
+default configuration at all. Force the switch on with setup 8 and it runs but
+the mask is still false: `init_state` puts `nd(mode_acc_insol)` at exactly
+`1e-14`, and the test is strictly greater, so both the wrong threshold and the
+right one give false.
 
-**Testability.** Both settings are distinguishable only on a setup with an
-insoluble accumulation mode, i.e. setup 8 among those supported. Setting `False`
-lowers the threshold to `1e-14` and admits condensation the Fortran suppresses,
-so it will disagree with any setup-8 golden.
+**Testability: currently none.** No configuration this repository can build
+distinguishes the two settings, so the both-settings test `docs/fidelity.md`
+requires of every flag cannot be written yet. It needs `l_dust_mp_ageing`,
+setup 8, and a constructed initial `nd(mode_acc_insol)` strictly inside
+`(1e-14, 1e-8]`.
+
+**So why keep the flag at all**, when UP-4 lost its flag for being unreachable?
+Because the two are different kinds of unreachable. UP-4 is unreachable by
+construction — `delgc_cond` is bounded in `[0, gc]`, so no input reaches it.
+UP-10 is unreachable by *configuration*: a legal setting of `l_dust_mp_ageing`
+plus a legal `nd` reaches it, and a UM run with dust microphysical ageing may
+well. The flag records a choice the port will have to make; the missing test is
+tracked, not pretended away.
 
 ## `drydiam_undersize_reset`
 
