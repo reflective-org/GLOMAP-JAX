@@ -93,6 +93,123 @@ ran.
 **Surface caps and clamps.** If a substep count is capped or a value clamped,
 report it. Silent truncation reads as success.
 
+
+## Repository layout
+
+```
+src/glomap_jax/
+  config/     model.py (what to run) + fidelity.py (how faithfully)
+  core/       state.py, numerics.py, constants.py — machinery every process
+              needs and none of them owns
+  physics/    one module per UKCA routine, ported in the order the Fortran
+              forces (see its docstring — it is not the naive order)
+  drivers/    eager + scan timestepping, which must agree to RTOL_JIT_VS_EAGER
+  utils/      helpers with no physics in them
+fortran/      vendored UKCA, READ-ONLY. src/ukca/ is Crown Copyright.
+inputs/       namelists this repo added; the shipped seven stay in fortran/
+outputs/      run scratch, gitignored. NOTHING here is a golden.
+tests/        including goldens/ + MANIFEST.json — the committed reference
+validation/   the harness: build scripts, overlays, f2py binding, capture
+docs/         harness.md is the map; porting-notes.md has every measurement
+benchmarks/   throughput, orders 2-3
+figures/      generated plots, gitignored by default
+```
+
+`validation/` is what `docs/harness.md` calls the harness. Not renamed to
+`harness/` because ~30 references point at it and the gain is cosmetic.
+
+## No hard-coded values
+
+Every physical constant and numerical threshold lives in
+`core/constants.py`, and `tests/test_constants.py` **re-parses the vendored
+Fortran and compares**. Do not type a constant from memory into a physics
+module; import it.
+
+The reason is arithmetic, not tidiness. UKCA carries `avogadro = 6.022e23`
+where CODATA says `6.02214076e23` — 3.6e-5 relative, four orders of magnitude
+above `RTOL_ALGEBRAIC`. "Correcting" it invalidates every golden downstream of
+a concentration conversion, and the failure surfaces in whichever routine
+happens to use it first.
+
+Derived quantities are **not** cached there. `mm_da = avogadro*boltzmann/rgas`
+is computed where it is used; a derived value in a constants table is a second
+source of truth.
+
+## Numerics: three rules, all measured
+
+`core/numerics.py` is not a convenience wrapper. Three primitives must be
+written a specific way, and the obvious way is silently wrong — wrong as in
+flipping a branch and moving a trajectory by O(1), not losing a digit.
+
+Measured over 15,382 points against the Fortran itself
+(`validation/capture_leaf.py`, asserted by `tests/test_numerics*.py`):
+
+| | JAX vs gfortran |
+|---|---|
+| `erf`, `log`, `1/x`, `x**(1/3)` | **bit-identical** |
+| `exp` | 456/3199 differ, max 2.1e-16 — 1 ulp, inside tolerance |
+| `jnp.cbrt` | 1756/1865 differ, max 1.3e-14 — **do not use** |
+| `jnp.round` | 64 of 129 ties differ — **do not use** |
+
+**Cube root is `x ** (1.0/3.0)`, never `jnp.cbrt`.** `cubrt_v` is literally that
+expression. `cbrt` is a genuinely better cube root and returns a real root for
+negatives where the power form gives NaN — which is exactly why it cannot be
+the faithful path. Its output is `drydp`, compared against `dp_thresh1` (merge
+or not) and `ddplim0*0.1` (rewrite `md`/`mdt` or not); both are step changes, so
+1.3e-14 flips them. Available as `FidelityConfig.cbrt_exact`, default `False`.
+
+**Rounding is `numerics.nint`, never `jnp.round`.** Fortran `NINT` rounds half
+away from zero. The live consumer is `ukca_vapour.F90:226`, `(NINT(wts/5))*5`,
+whose result **indexes a lookup table** — a tie that rounds the other way picks
+a different entry, not a nearby number. Note `sign(x)*floor(|x|+0.5)` is also
+wrong, at `x = ±0.49999999999999994`.
+
+**`0.0 * inf` is `NaN`.** Mask before reducing — `numerics.masked_sum`, i.e.
+`jnp.where(mask, term, 0.0)`, never `mask * term`. Bites at
+`ukca_ageing.F90:308`, an unmasked whole-array `SUM` gating a transfer block.
+
+**Divide with `numerics.safe_divide`.** Single-`where` division gives a NaN
+cotangent; reverse mode differentiates the branch not taken.
+
+**XLA flushes subnormal arithmetic results to zero**, gfortran does not. Latent
+(`num_eps` bottoms at 1e-20, `eps_d` at 1e-40, both normal in float64) but it
+would present as a gate-0 disagreement with no arithmetic explanation. Issue
+#15. Re-measure on CUDA.
+
+## What the harness can and cannot tell you
+
+Four gates, none subsuming another — `docs/harness.md` has the full map.
+
+* **Gate 0** — did the same *predicate* go the same way? Catches nothing that
+  is not a branch.
+* **Gate A** — does one *routine* agree at machine precision? In-process f2py.
+  Says nothing about sequencing. Currently compares 15 of 39 columns on one row
+  of one case (#17), and dies on 19 of 20 error paths (#16).
+* **Gate B** — which *call* diverged? Per-process dumps, keyed
+  `(step, seq, imts, izts)`. `seq` is load-bearing: without it the key is not
+  unique, because `drydiam` and `volume_mode` each run twice per `imts`.
+* **Gate C** — does the *run* agree? Committed goldens. Cannot say where.
+
+Setups **1, 2, 3, 4, 5, 6, 8** only. Mode slots **1–7**; slot 8
+`mode_sup_insol` needs setup 12 or 13, which the box model does not implement.
+`modesol = [1,1,1,1,0,0,0,0]` in every setup — the soluble/insoluble split is
+structural; only `mode_choice` varies.
+
+## Two failure modes this repo actually has
+
+Both have recurred across every review so far. Assume they are present now.
+
+**Tests that cannot fail.** Nine found so far, across two reviews — one with no
+assertion at all, one asserting `float(f"{v:.16E}") == v` (true of every
+double), one substring-matching a script that names no source file. Before
+writing a test, name the mutation that would fail it; then apply that mutation
+and check it does.
+
+**Claims that do not survive checking.** Twenty-one wrong statements found in
+one review, including an ADR still carrying a justification an earlier review
+had already recorded as false, and a fidelity flag documented backwards. If a
+doc states a number, it must be reproducible from committed data.
+
 ## Working practice
 
 One commit per task, each with an acceptance criterion, repo green at every

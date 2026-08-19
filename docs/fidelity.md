@@ -185,3 +185,36 @@ silently removed rather than redistributed. It also mutates the caller's mask
 in place, which needs the sequential `icp` scan.
 
 Not ported. `ukca_mode_check_artefacts` has no caller in the box model at all.
+
+## `cbrt_exact`
+
+**Default `False` — reproduce the Fortran.** Not an upstream defect: a place
+where JAX offers something better and taking it would break the port.
+
+`ukca_um_legacy_mod.F90:450` defines `cubrt_v` as literally
+
+```fortran
+y(i) = x(i) ** (1.0 / 3.0)
+```
+
+That is a power, not a cube root, and the two are not the same computation.
+Measured over 1,865 swept points: `x ** (1.0/3.0)` in JAX is **bit-identical**
+to the Fortran; `jnp.cbrt` differs on **1,756** of them by up to **1.3e-14**,
+which is a hundred times `RTOL_ALGEBRAIC`.
+
+The reason that matters is not the size. `cubrt_v` produces `drydp`, and
+`drydp` is compared directly against `dp_thresh1` (`ukca_remode.F90:234` — merge
+or not) and against `ddplim0*0.1` (`ukca_calc_drydiam.F90:250` — rewrite `md`
+and `mdt` or not). Both are step changes, so a parcel sitting within 1.3e-14 of
+either threshold goes one way in the reference and the other in the port, and
+the trajectories separate by O(1).
+
+They also disagree about negatives: `x ** (1.0/3.0)` is a non-integer power of a
+negative and is `NaN`, while `jnp.cbrt` returns the real root. That is *more*
+correct, and is exactly why it cannot be the faithful path. Unreachable today —
+`dvol >= 0` everywhere `cubrt_v` is called — but it is the failure a `cbrt` port
+would produce the first time it was not.
+
+Setting `True` selects `jnp.cbrt`. It will disagree with every committed golden,
+which is the correct behaviour for an accuracy option: it belongs to order 2,
+alongside diffrax, not to the faithful path.

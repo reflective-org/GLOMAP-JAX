@@ -36,6 +36,7 @@ FORTRAN_BEHAVIOUR = {
     "l_fix_ukca_hygroscopicities": True,
     "checkmd_nd": False,
     "iextra_checks": 0,
+    "cbrt_exact": False,
 }
 
 
@@ -61,17 +62,29 @@ NOT_YET_CONSUMED = {
     "l_fix_ukca_hygroscopicities",  # phase C, task 30
     "checkmd_nd",  # phase I, task 79
     "iextra_checks",  # phase H, task 71
+    "cbrt_exact",  # phase D, task 36 -- numerics.cbrt takes it as an argument
 }
 
 
 def _mentions_in_code(path, name):
-    """True if `name` appears outside a comment. A flag named only in prose is
-    documented, not consumed, and this test exists to tell those apart."""
-    for line in path.read_text(encoding="utf-8").splitlines():
-        code = line.split("#", 1)[0]
-        if name in code:
-            return True
-    return False
+    """True if `name` appears as actual code, not in a comment or a docstring.
+
+    Tokenising rather than string-matching, because prose is where flags get
+    mentioned most. `core/numerics.py` documents `FidelityConfig.cbrt_exact` at
+    length in its module docstring and does not read it — the flag is passed to
+    `cbrt(exact=...)` by a caller that does not exist yet. A substring match
+    would call that consumed and the test would be measuring documentation.
+    """
+    import tokenize
+
+    with path.open("rb") as fh:
+        try:
+            tokens = list(tokenize.tokenize(fh.readline))
+        except tokenize.TokenError:  # pragma: no cover - malformed source
+            return name in path.read_text(encoding="utf-8")
+    return any(
+        name in tok.string for tok in tokens if tok.type not in (tokenize.COMMENT, tokenize.STRING)
+    )
 
 
 def test_every_flag_is_in_the_expected_behaviour_table():
@@ -122,13 +135,13 @@ def test_every_flag_is_referenced_in_src(name):
     skip, so the list has to shrink as each phase lands, and a flag that is
     neither consumed nor declared pending fails.
 
-    config.py is excluded -- defining the field is not using it. So are
-    comments: a flag named only in prose is not read by anything.
+    The config subpackage is excluded -- defining the field is not using it.
+    So are comments: a flag named only in prose is not read by anything.
     """
     consumers = sorted(
         p.name
         for p in (REPO / "src").rglob("*.py")
-        if p.name != "config.py" and _mentions_in_code(p, name)
+        if "config" not in p.parts and _mentions_in_code(p, name)
     )
     if name in NOT_YET_CONSUMED:
         assert not consumers, (

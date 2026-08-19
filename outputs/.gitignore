@@ -1,0 +1,5 @@
+# Run products. Regenerated, never committed -- goldens live in tests/goldens/
+# and are the only reference output under version control.
+*
+!.gitignore
+!README.md

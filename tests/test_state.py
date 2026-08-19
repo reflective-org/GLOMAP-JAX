@@ -4,8 +4,8 @@ import jax
 import jax.numpy as jnp
 import pytest
 
-from glomap_jax import state as st
 from glomap_jax.config import SUPPORTED_MODE_SETUPS, FidelityConfig, ModelConfig
+from glomap_jax.core import state as st
 
 
 def _zeros(nbox=2):

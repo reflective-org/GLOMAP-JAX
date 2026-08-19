@@ -51,7 +51,7 @@ import numpy as np
 
 REPO = Path(__file__).resolve().parents[1]
 FORTRAN = REPO / "fortran"
-NAMELIST_DIRS = (FORTRAN / "namelists", REPO / "validation" / "namelists")
+NAMELIST_DIRS = (FORTRAN / "namelists", REPO / "inputs" / "namelists")
 DEFAULT_OUT = REPO / "tests" / "goldens"
 
 # mode -> (namelist key, which variants are worth capturing)
@@ -96,7 +96,7 @@ class Job:
 def discover_cases() -> dict[str, Path]:
     """Namelists from both directories, keyed by stem.
 
-    `fortran/namelists/` are the shipped cases; `validation/namelists/` are ones
+    `fortran/namelists/` are the shipped cases; `inputs/namelists/` are ones
     this repo added to cover structure the shipped set misses (`bl_nmts3` is the
     only case with `nmts > 1`, so it is the only one that exercises the nested
     outer/inner scan at all).

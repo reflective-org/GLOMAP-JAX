@@ -67,7 +67,7 @@ def test_nmts_outer_loop_is_observable(tmp_path):
 
     a, b = tmp_path / "n1.csv", tmp_path / "n3.csv"
     _run(exe, FORTRAN / "namelists" / "boundary_layer.nml", a, "out/boundary_layer.csv")
-    _run(exe, REPO / "validation" / "namelists" / "bl_nmts3.nml", b, "out/bl_nmts3.csv")
+    _run(exe, REPO / "inputs" / "namelists" / "bl_nmts3.nml", b, "out/bl_nmts3.csv")
 
     header, rows_a = _load(a)
     _, rows_b = _load(b)
@@ -100,7 +100,7 @@ def test_nmts3_case_runs_and_is_finite(tmp_path):
     if not exe.is_file():
         pytest.skip("reference not built; run validation/build_reference.sh")
     out = tmp_path / "n3.csv"
-    _run(exe, REPO / "validation" / "namelists" / "bl_nmts3.nml", out, "out/bl_nmts3.csv")
+    _run(exe, REPO / "inputs" / "namelists" / "bl_nmts3.nml", out, "out/bl_nmts3.csv")
     _, rows = _load(out)
     assert len(rows) == 49
     # isfinite, not `v == v`: the latter rejects NaN and passes Infinity.

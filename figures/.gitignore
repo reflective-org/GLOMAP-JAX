@@ -1,0 +1,6 @@
+# Generated plots. Commit one deliberately if a document cites it.
+*.png
+*.pdf
+*.svg
+!.gitignore
+!README.md
