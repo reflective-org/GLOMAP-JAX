@@ -95,7 +95,7 @@ cd "$OUT/_build"
 
 # shellcheck disable=SC2086
 PATH="$(dirname "$PY"):$PATH" "$PY" -m numpy.f2py \
-  -c "$OUT/glomap_f2py_mod.F90" "$OUT/glomap_leaf_mod.F90" \
+  -c "$OUT/glomap_f2py_mod.F90" "$OUT/glomap_leaf_mod.F90" "$OUT/glomap_modes_mod.F90" \
   -m "$MODULE" \
   --f90flags="$FCFLAGS -I$FORTRAN/$BUILD" \
   -I"$FORTRAN/$BUILD" \
