@@ -90,6 +90,7 @@ def test_the_extension_exposes_the_expected_entry_points():
         "wrap_gas_scalar",
         "wrap_get_2d",
         "wrap_get_budgets",
+        "wrap_get_config_flags",
         "wrap_get_md",
         "wrap_get_s0g",
         "wrap_init",
@@ -99,6 +100,8 @@ def test_the_extension_exposes_the_expected_entry_points():
         "wrap_mode_real",
         "wrap_nchemgmax",
         "wrap_set_2d",
+        "wrap_set_fix_neg_pvol_wat",
+        "wrap_set_fix_water_content",
         "wrap_set_md",
         "wrap_sizes",
         "wrap_step",
@@ -501,3 +504,151 @@ def test_the_reference_binary_still_dies_on_a_fatal_error():
         "reverted or the f2py shim has leaked into the reference build."
     )
     assert "shim" not in result.stdout, "the reference is running the shim"
+
+
+# ---------------------------------------------------------------------------
+# The phase-D physics leaves (task 35a).
+#
+# These four are the first drivers that call science routines rather than
+# intrinsics, so they are the first that can be wired up wrongly in ways an
+# intrinsic wrapper cannot: the wrong array order, a lost INTENT(IN OUT), a
+# glomap_variables that was never populated. The tests below are gate A on the
+# drivers themselves, against a committed golden.
+# ---------------------------------------------------------------------------
+
+
+def _snapshot(case, site):
+    """One per-process state snapshot from a committed gate-B golden."""
+    d = np.load(REPO / "tests" / "goldens" / f"{case}.f64.state.npz")
+    site_of, field_of = d["site_levels"][d["site"]], d["field_levels"][d["field"]]
+    m = site_of == site
+    assert m.any(), f"{case} has no {site} snapshot"
+    first = {k: d[k][m][0] for k in ("step", "seq", "imts", "izts")}
+    sel = m
+    for k, v in first.items():
+        sel = sel & (d[k] == v)
+    out = {}
+    for f in np.unique(field_of[sel]):
+        s = sel & (field_of == f)
+        out[str(f)] = (d["imode"][s], d["icp"][s], d["value"][s])
+    return out
+
+
+def _as_mode_column(entry, nmodes=8):
+    imode, _, value = entry
+    a = np.zeros(nmodes)
+    a[imode - 1] = value
+    return a
+
+
+def _as_md(entry, nmodes=8, ncp=6):
+    imode, icp, value = entry
+    a = np.zeros((1, nmodes, ncp))
+    a[0, imode - 1, icp - 1] = value
+    return a
+
+
+@needs_binding
+def test_the_physics_leaves_refuse_to_run_before_init():
+    """The reason they carry a guard and the numerics leaves do not.
+
+    `avogadro`, `rho_so4`, `rho_water` and `rmol` are `REAL, SAVE :: x = rmdi`
+    in `ukca_config_constants_mod`, assigned only by `init_config_constants()`
+    from `init_ukca_for_box`. Called cold, these routines would return
+    plausible-looking numbers built from a missing-data sentinel -- which is
+    exactly the kind of output a fixture capture would happily write to a
+    golden. `ierr = 4` is the refusal.
+    """
+    result = run_in_subprocess("""
+        n = 2
+        z8 = np.zeros((n, 8))
+        result = {
+            "vapour": int(g.leaf_vapour(np.full(n, 280.0), np.full(n, 1e5),
+                                        np.full(n, 1e-3), np.full(n, 1e-7))[-1]),
+            "water": int(g.leaf_water_content(np.zeros(n, dtype=np.int32),
+                                              np.zeros((n, 8), dtype=np.int32),
+                                              np.zeros((n, 8)), np.full(n, 0.5))[-1]),
+            "drydiam": int(g.leaf_drydiam(z8, np.zeros((n, 8, 6)), z8)[-1]),
+            "volume_mode": int(g.leaf_volume_mode(z8, np.zeros((n, 8, 6)), z8,
+                                                  np.full(n, 0.5), z8, z8,
+                                                  np.full(n, 280.0), np.full(n, 1e5),
+                                                  np.full(n, 1e-3))[-1]),
+            "flags": int(g.wrap_get_config_flags()[-1]),
+        }
+    """)
+    assert result == dict.fromkeys(("vapour", "water", "drydiam", "volume_mode", "flags"), 4)
+
+
+@needs_binding
+def test_leaf_drydiam_reproduces_a_committed_golden_snapshot():
+    """Gate A for the driver: same inputs as a recorded call, same `drydp`,
+    byte for byte. Catches a transposed array or an unpopulated
+    `glomap_variables` in a way a finiteness check never would."""
+    nml = str(NAMELISTS / "boundary_layer.nml")
+    snap = _snapshot("boundary_layer", "drydiam")
+    nd = _as_mode_column(snap["nd"])[None, :]
+    mdt = _as_mode_column(snap["mdt"])[None, :]
+    md = _as_md(snap["md"])
+    want = _as_mode_column(snap["drydp"])
+
+    result = run_in_subprocess(f"""
+        g.wrap_init({nml!r})
+        nd, mdt = np.array({nd.tolist()!r}), np.array({mdt.tolist()!r})
+        md = np.array({md.tolist()!r})
+        drydp, dvol, md_out, mdt_out, ierr = g.leaf_drydiam(nd, md, mdt)
+        result = {{
+            "ierr": int(ierr),
+            "drydp": np.asarray(drydp)[0].tolist(),
+            "md_unchanged": bool(np.array_equal(np.asarray(md_out), md)),
+            "ereport": [int(v) for v in g.wrap_ereport_count()],
+        }}
+    """)
+    assert result["ierr"] == 0
+    assert result["ereport"] == [0, 0, 0]
+    np.testing.assert_array_equal(np.array(result["drydp"]), want)
+    # No reset fires on a trajectory state -- the undersize branch is 0/2160
+    # across every shipped namelist, which is why task 37 needs built inputs.
+    assert result["md_unchanged"]
+
+
+@needs_binding
+def test_leaf_volume_mode_reproduces_a_committed_golden_snapshot():
+    """The same, for the routine phase D spends five tasks on.
+
+    `dvol` and `drydp` come from `leaf_drydiam` on the same state rather than
+    being invented: an independently chosen zero would trip the five-way guard
+    at `ukca_volume_mode.F90:704-708` and void the call.
+
+    `s` is not in the golden -- it is derived from `rel_humid = 0.60` by the
+    Tetens formula in `glomap_box_env_mod.F90:122-124`. That makes this a test
+    of the derived value too, since `mdwat` reaches it through `ukca_vapour`.
+    """
+    nml = str(NAMELISTS / "boundary_layer.nml")
+    snap = _snapshot("boundary_layer", "volume_mode")
+    nd = _as_mode_column(snap["nd"])[None, :]
+    mdt = _as_mode_column(snap["mdt"])[None, :]
+    md = _as_md(snap["md"])
+
+    result = run_in_subprocess(f"""
+        g.wrap_init({nml!r})
+        nd, mdt = np.array({nd.tolist()!r}), np.array({mdt.tolist()!r})
+        md = np.array({md.tolist()!r})
+        drydp, dvol, _, _, e1 = g.leaf_drydiam(nd, md, mdt)
+        mdwat, wvol, wetdp, rhopar, pvol, pvol_wat, e2 = g.leaf_volume_mode(
+            nd, md, mdt, np.array([0.60]), dvol, drydp,
+            np.array([288.0]), np.array([1.0e5]),
+            np.array([6.31470508962842913e-03]))
+        result = {{
+            "ierr": [int(e1), int(e2)],
+            "wetdp": np.asarray(wetdp)[0].tolist(),
+            "mdwat": np.asarray(mdwat)[0].tolist(),
+            "rhopar": np.asarray(rhopar)[0].tolist(),
+            "ereport": [int(v) for v in g.wrap_ereport_count()],
+        }}
+    """)
+    assert result["ierr"] == [0, 0]
+    assert result["ereport"] == [0, 0, 0]
+    for field in ("wetdp", "mdwat", "rhopar"):
+        np.testing.assert_array_equal(
+            np.array(result[field]), _as_mode_column(snap[field]), err_msg=field
+        )

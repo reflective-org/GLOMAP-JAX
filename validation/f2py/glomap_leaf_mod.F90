@@ -185,3 +185,294 @@ USE ereport_mod, ONLY: ereport_shim_reset
 IMPLICIT NONE
 CALL ereport_shim_reset()
 END SUBROUTINE wrap_ereport_reset
+
+
+! ---------------------------------------------------------------------------
+! Phase D physics leaves (task 35a).
+!
+! These four differ from the numerics leaves above in one way that matters:
+! the numerics leaves touch only PARAMETERs, so they are meaningful before
+! wrap_init. These are not. `avogadro`, `rho_so4`, `rho_water` and `rmol` are
+! `REAL, SAVE :: x = rmdi` in ukca_config_constants_mod and are assigned only
+! by init_config_constants(), called from init_ukca_for_box
+! (glomap_box_config_mod.F90:317). Called cold, these routines return
+! plausible-looking numbers built from a missing-data sentinel. Hence the
+! init guard on all four:
+!
+!   ierr = 0  fine
+!        = 1  the process is poisoned; a previous init failed or the switches
+!             changed, so nothing here can be trusted
+!        = 2  a shape argument disagrees with the module's own extents
+!        = 4  wrap_init has not run
+!
+! Logicals cross as INTEGER 0/1 rather than as LOGICAL, following
+! glomap_modes_mod's convention: the callee wants LOGICAL(KIND=log_small),
+! which is SELECTED_INT_KIND(1) -- one byte -- and f2py's notion of a Fortran
+! logical is not something to depend on for a kind that narrow.
+! ---------------------------------------------------------------------------
+
+SUBROUTINE leaf_vapour(n, t, pmid, s, rp, wts, rhosol_strat, ierr)
+! ukca_vapour is setup-independent: it takes no glomap_variables argument and
+! reads no per-setup table, so one process can sweep it whole.
+!
+! `rp` is in the signature although the chain it feeds (ph2so4, muh2so4,
+! kelvin, kelvin_out) reaches neither INTENT(OUT). Sweeping it and asserting
+! the outputs do not move is the cheapest confirmation of that analysis, and
+! it costs one argument.
+USE ukca_vapour_mod,   ONLY: ukca_vapour
+USE glomap_f2py_state, ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n
+REAL(KIND=8), INTENT(IN)  :: t(n), pmid(n), s(n), rp(n)
+REAL(KIND=8), INTENT(OUT) :: wts(n), rhosol_strat(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+wts          = 0.0
+rhosol_strat = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+ierr = 0
+CALL ukca_vapour(n, t, pmid, s, rp, wts, rhosol_strat)
+END SUBROUTINE leaf_vapour
+
+
+SUBROUTINE leaf_water_content(n, mask_i, ions_i, cl, rh, wc, ierr)
+! Also setup-independent -- ncation and nanion are PARAMETERs, not per-setup.
+!
+! Two things here are not cosmetic.
+!
+! `wc` is INTENT(OUT) but the callee writes only wc(idx(:m)) -- the compacted,
+! masked rows. Unmasked rows would carry whatever was on the stack into a
+! golden, so it is zeroed here before the call rather than trusted afterwards.
+!
+! `cl` and `ions` are declared (nv,-nanion:ncation) in the callee. f2py cannot
+! express a negative lower bound, so they cross as (n,8) and are remapped
+! here. The extents are asserted rather than assumed: if ncation and nanion
+! ever change, +5 stops being the right offset and this must fail loudly
+! instead of silently shifting every ion by one.
+USE ukca_water_content_v_mod, ONLY: ukca_water_content_v
+USE ukca_mode_setup,          ONLY: ncation, nanion
+USE ukca_types_mod,           ONLY: log_small
+USE glomap_f2py_state,        ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n
+INTEGER,      INTENT(IN)  :: mask_i(n)
+INTEGER,      INTENT(IN)  :: ions_i(n, 8)
+REAL(KIND=8), INTENT(IN)  :: cl(n, 8)
+REAL(KIND=8), INTENT(IN)  :: rh(n)
+REAL(KIND=8), INTENT(OUT) :: wc(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+LOGICAL(KIND=log_small) :: mask(n)
+LOGICAL(KIND=log_small) :: ions(n, -4:3)
+REAL(KIND=8)            :: cl_l(n, -4:3)
+INTEGER                 :: i, j
+
+wc = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (ncation /= 3 .OR. nanion /= 4) THEN
+  ierr = 2
+  RETURN
+END IF
+ierr = 0
+
+DO i = 1, n
+  mask(i) = (mask_i(i) /= 0)
+  DO j = -4, 3
+    ions(i, j) = (ions_i(i, j + 5) /= 0)
+    cl_l(i, j) = cl(i, j + 5)
+  END DO
+END DO
+
+CALL ukca_water_content_v(n, mask, cl_l, rh, ions, wc)
+END SUBROUTINE leaf_water_content
+
+
+SUBROUTINE leaf_drydiam(n, nm, ncp_in, nd, md_in, mdt_in,                      &
+                        drydp, dvol, md_out, mdt_out, ierr)
+! Setup-DEPENDENT: takes glomap_variables_local, so one subprocess per
+! i_mode_setup, and the module-level glomap_variables is what gets passed.
+!
+! md and mdt are INTENT(IN OUT) in the callee and are rewritten by the
+! undersize reset at :253-256. They are NOT passed through as in-out here.
+! f2py's copy-in/copy-out for INTENT(IN OUT) depends on the incoming array's
+! dtype, order and contiguity: with a non-conforming array the mutation is
+! silently dropped, and with a conforming one the caller's grid is silently
+! overwritten so the next call is driven by the previous call's output. Both
+! failures are invisible from Python. Copy into locals, return the results
+! separately, and let the caller compare in_ against out.
+USE ukca_calc_drydiam_mod,         ONLY: ukca_calc_drydiam
+USE ukca_mode_setup,               ONLY: nmodes
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in
+REAL(KIND=8), INTENT(IN)  :: nd(n, nm)
+REAL(KIND=8), INTENT(IN)  :: md_in(n, nm, ncp_in)
+REAL(KIND=8), INTENT(IN)  :: mdt_in(n, nm)
+REAL(KIND=8), INTENT(OUT) :: drydp(n, nm), dvol(n, nm)
+REAL(KIND=8), INTENT(OUT) :: md_out(n, nm, ncp_in)
+REAL(KIND=8), INTENT(OUT) :: mdt_out(n, nm)
+INTEGER,      INTENT(OUT) :: ierr
+
+drydp   = 0.0
+dvol    = 0.0
+md_out  = md_in
+mdt_out = mdt_in
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp) THEN
+  ierr = 2
+  RETURN
+END IF
+ierr = 0
+
+CALL ukca_calc_drydiam(n, glomap_variables, nd, md_out, mdt_out, drydp, dvol)
+END SUBROUTINE leaf_drydiam
+
+
+SUBROUTINE leaf_volume_mode(n, nm, ncp_in, nd, md, mdt, rh, dvol, drydp,       &
+                            t, pmid, s, mdwat, wvol, wetdp, rhopar,            &
+                            pvol, pvol_wat, ierr)
+! Setup-dependent, same as leaf_drydiam.
+!
+! dvol and drydp are INPUTS here. Feed them from leaf_drydiam's outputs on the
+! same (nd, md) rows: inventing them independently risks a zero that trips the
+! five-way guard at :704-708 and voids the whole call.
+USE ukca_volume_mode_mod,          ONLY: ukca_volume_mode
+USE ukca_mode_setup,               ONLY: nmodes
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in
+REAL(KIND=8), INTENT(IN)  :: nd(n, nm), md(n, nm, ncp_in), mdt(n, nm)
+REAL(KIND=8), INTENT(IN)  :: rh(n), dvol(n, nm), drydp(n, nm)
+REAL(KIND=8), INTENT(IN)  :: t(n), pmid(n), s(n)
+REAL(KIND=8), INTENT(OUT) :: mdwat(n, nm), wvol(n, nm), wetdp(n, nm)
+REAL(KIND=8), INTENT(OUT) :: rhopar(n, nm), pvol(n, nm, ncp_in), pvol_wat(n, nm)
+INTEGER,      INTENT(OUT) :: ierr
+
+mdwat    = 0.0
+wvol     = 0.0
+wetdp    = 0.0
+rhopar   = 0.0
+pvol     = 0.0
+pvol_wat = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp) THEN
+  ierr = 2
+  RETURN
+END IF
+ierr = 0
+
+CALL ukca_volume_mode(glomap_variables, n, nd, md, mdt, rh, dvol, drydp,       &
+                      t, pmid, s, mdwat, wvol, wetdp, rhopar, pvol, pvol_wat)
+END SUBROUTINE leaf_volume_mode
+
+
+! ---------------------------------------------------------------------------
+! Config setters for the two phase-D fidelity flags.
+!
+! These write glomap_config AFTER wrap_init has run, which is the only way to
+! sweep a flag whose effect is inside a science routine rather than inside the
+! mode-table setup. Both are deliberately narrow: they touch one LOGICAL each
+! and nothing derived from it.
+!
+! l_fix_ukca_water_content is a ONE-WAY LATCH in the callee and no setter can
+! undo it. ukca_water_content_v.F90:235 patches its own SAVEd, DATA-initialised
+! `y` table in place when the flag is on and never restores it, so a process
+! that has ever seen .TRUE. keeps the patched coefficient for good. Setting it
+! back to .FALSE. here changes the flag and NOT the table. Sweep it with one
+! subprocess per setting. Issue #22, and CLAUDE.md's process-global state rule.
+! ---------------------------------------------------------------------------
+
+SUBROUTINE wrap_set_fix_water_content(v, ierr)
+USE ukca_config_specification_mod, ONLY: glomap_config
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER, INTENT(IN)  :: v
+INTEGER, INTENT(OUT) :: ierr
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+ierr = 0
+glomap_config%l_fix_ukca_water_content = (v /= 0)
+END SUBROUTINE wrap_set_fix_water_content
+
+
+SUBROUTINE wrap_set_fix_neg_pvol_wat(v, ierr)
+USE ukca_config_specification_mod, ONLY: glomap_config
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER, INTENT(IN)  :: v
+INTEGER, INTENT(OUT) :: ierr
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+ierr = 0
+glomap_config%l_fix_neg_pvol_wat = (v /= 0)
+END SUBROUTINE wrap_set_fix_neg_pvol_wat
+
+
+SUBROUTINE wrap_get_config_flags(fix_water, fix_neg_pvol, o_setup, ierr)
+! Read-back, so a capture confirms what the Fortran actually holds rather than
+! what the text that was meant to set it says. The mode-table captures learned
+! this the hard way: a substitution that silently matched nothing produced a
+! golden with identical data for all seven setups, and every byte-equality
+! test passed against it.
+USE ukca_config_specification_mod, ONLY: glomap_config
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER, INTENT(OUT) :: fix_water, fix_neg_pvol, o_setup, ierr
+fix_water    = -1
+fix_neg_pvol = -1
+o_setup      = -1
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+ierr = 0
+fix_water    = MERGE(1, 0, glomap_config%l_fix_ukca_water_content)
+fix_neg_pvol = MERGE(1, 0, glomap_config%l_fix_neg_pvol_wat)
+o_setup      = glomap_config%i_mode_setup
+END SUBROUTINE wrap_get_config_flags
