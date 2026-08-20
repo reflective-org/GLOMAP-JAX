@@ -28,9 +28,14 @@ each grid is built to land on the hazard rather than near it:
   grid includes exact cubes, where any honest cube root returns an integer and
   the power form need not.
 * **NINT** rounds half away from zero; numpy and `jnp.round` round half to
-  even. `ukca_vapour.F90:226` computes `(NINT(wts/5))*5` with `wts` clamped to
-  `[41, 99]`, so `wts = 42.5, 47.5, …` land exactly on ties. Both the bare
+  even. `ukca_vapour.F90:226` computes `(NINT(wts/5))*5`, so
+  `wts = 42.5, 47.5, …` land exactly on ties, and the result indexes a lookup
+  table — a tie going the wrong way selects a different row. Both the bare
   intrinsic and the live idiom are swept.
+
+  `wts` is floored at 41 in both arms but is **not** clamped to `[41, 99]`, as
+  this said: only the `l_fix_neg_pvol_wat` arm has the ceiling (`:184`), and
+  the default arm reaches 103.8.
 
 The grids are exactly reproducible
 ----------------------------------

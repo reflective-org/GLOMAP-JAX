@@ -39,8 +39,13 @@
 !       Fortran actually performs.
 !
 !     * Fortran NINT rounds half AWAY FROM ZERO; numpy and jnp.round round half
-!       to EVEN. `ukca_vapour.F90:226` computes `(NINT(wts/5))*5` with wts
-!       clamped to [41, 99], so wts = 42.5, 47.5, ... land exactly on ties.
+!       to EVEN. `ukca_vapour.F90:226` computes `(NINT(wts/5))*5`, so
+!       wts = 42.5, 47.5, ... land exactly on ties.
+!
+!       wts is NOT clamped to [41, 99], as this said. Only the
+!       l_fix_neg_pvol_wat arm has the 99 ceiling (`:184`); the default arm is
+!       MAX(41.0, ws*100) with no ceiling (`:188`), and reaches 103.8 at
+!       T = 303.65, bh2o = 2e-8. The floor of 41 is common to both.
 !       leaf_vapour_round exposes that idiom directly rather than NINT alone,
 !       because the idiom is what the port has to reproduce.
 !

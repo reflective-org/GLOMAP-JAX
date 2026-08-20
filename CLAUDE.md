@@ -207,6 +207,25 @@ Setups **1, 2, 3, 4, 5, 6, 8** only. Mode slots **1–7**; slot 8
 `modesol = [1,1,1,1,0,0,0,0]` in every setup — the soluble/insoluble split is
 structural; only `mode_choice` varies.
 
+### Process-global Fortran state: one subprocess per configuration
+
+Two module-level latches make a capture that sweeps a switch in one process
+give the wrong answer *silently*, so every capture forks per configuration.
+
+* **`ukca_mode_setup` never deallocates.** One subprocess per `i_mode_setup`.
+  `wrap_init` refuses a second init with different switches and poisons the
+  process rather than returning a stale table.
+* **`ukca_water_content_v.F90:235` patches its own `y` table in place**
+  (`REAL :: y(3,-4:-1,0:7)`, DATA-initialised, `THREADPRIVATE` so implicitly
+  `SAVE`) when `l_fix_ukca_water_content` is on, and never restores it. It is a
+  one-way latch: measured F,F,T,F,T,F, the water content stays at the patched
+  value from the first `T` onward — a factor of 2.28 for an H+/NO3- particle,
+  in the configuration that asked not to have the fix. Issue #22.
+
+So **one subprocess per flag setting too**, and any both-settings test must
+assert the two settings genuinely differ. Run in one process, they compare the
+patched table against itself and pass.
+
 ## Two failure modes this repo actually has
 
 Both have recurred across every review so far. Assume they are present now.
