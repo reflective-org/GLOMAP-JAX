@@ -205,6 +205,83 @@ from the driver, outside `ukca_aero_step` entirely. Those records are tagged
 `imts = izts = -1` so they are not mistaken for the tail of the step that just
 ran. The port's driver has to reproduce that call.
 
+## Four ways identical algebra gives a different double (phase C)
+
+Porting the mode tables to byte equality took four corrections. None was a
+mistake about the physics; all four are the same category of error, and all
+four would have passed silently under a tolerance.
+
+**`d**3` is not `d*d*d`.** gfortran expands an integer literal exponent into
+repeated multiplication; numpy's `**` calls `pow()`. They disagree by one ulp
+on two of the eight modes here. This was the last thing checked.
+
+**Factor order is load-bearing.** The Fortran writes
+`(pi/6) * d**3 * (rhommav*avogadro) * x`, left-associated. All three mode
+masses share the `(pi/6) * (rhommav*avogadro) * x` sub-product, and factoring
+it out — the obvious optimisation — reassociates and breaks all three.
+Multiplication is commutative in the reals and not in float64.
+
+**Switch order is load-bearing too.** `rhocomp` is laid down as a literal, then
+patched by `l_fix_nacl_density` (1600 → 2165 for sea salt), and only *then* do
+the masses derive from it. Applying the switch afterwards leaves the masses
+built from the uncorrected density, silently, and by 35% on any mode carrying
+sea salt.
+
+**A nested `.AND.` is not two independent knobs.**
+`ukca_mode_setup.F90:168` tests
+`l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density` before assigning
+`no_ions`, so NaCl density only reaches that table when hygroscopicities is
+also on. Reading them as independent selects the default branch and gets all
+seven setups wrong *in the same way* — which presents as a systematic bug
+rather than a misread conditional.
+
+Also written faithfully rather than idiomatically, for the same reason:
+`ddpmid` as `EXP(0.5*(LOG a + LOG b))` not `sqrt(a·b)`, `x` as
+`EXP(4.5·LOG(sg)·LOG(sg))` not a square, and `rhommav` accumulated in index
+order rather than as a vector `sum` — a pairwise reduction associates
+differently.
+
+## `topmode` is not the highest active mode
+
+It reads exactly as though it should be. `ukca_mode_setup.F90:418-422` sets it
+to `nmodes` when `l_dust_mp_ageing` and to `mode_ait_insol` (**5**) otherwise,
+*regardless of `mode_choice`*.
+
+The box model defaults that switch off, so `topmode` is 5 in every supported
+setup — including setup 8, where modes 6 and 7 are active. Loops written
+`DO imode = 1, topmode` (`ukca_conden.F90:299`) or
+`DO imode = mode_ait_insol, topmode` (`ukca_ageing.F90:219`) therefore stop at
+5 and never reach them. Verified against the binding: flipping the switch gives
+8.
+
+This is what made UP-10's impact claim wrong twice — three of its four lines
+are gated on `topmode > mode_ait_insol`, which is false by default.
+
+## `component_mode` is a permission table, not a presence table
+
+`component_mode` is which components are *allowed* in each mode — the source
+comments say "allowed in nuc_sol". `component` is which are actually *present*
+for this setup: the three-way intersection of allowed, chosen, and mode-is-on.
+
+Assuming they are the same passes on setup 1 and fails on five of the other
+six. The invariant is containment, and the test also asserts the two genuinely
+differ, so the containment check cannot quietly go vacuous.
+
+## `i_tune_bc` has no `CASE DEFAULT`
+
+`ukca_mode_setup.F90:425-430` selects on `i_tune_bc` with exactly two named
+cases, 1 (tuned, 1900 kg m⁻³) and 2 (Mie-mixture, 1800). There is no
+`CASE DEFAULT`, so any other value silently leaves `rhocomp(cp_bc)` at its
+literal 1500 rather than failing.
+
+Reproduced rather than corrected — the port matches the reference including its
+silences — and captured as the `bc_oob` golden so the silence is recorded
+rather than assumed. Same shape as UP-5's unchecked `icoag`, and worth
+mentioning alongside it if that is ever filed upstream.
+
+`i_tune_bc` is also inert unless `l_radaer` is on, which the box model defaults
+off, so BC density tuning is unreachable in the default configuration.
+
 ## Setup coverage of the shipped namelists
 
 `boundary_layer` and `free_troposphere` are both `i_mode_setup = 1` — four
