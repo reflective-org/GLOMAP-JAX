@@ -115,17 +115,24 @@ Measured, at the namelists' own 48 steps:
 | budgets | 0.13 MB | |
 | state | 15.90 MB | |
 | branches | 3.82 MB | |
-| **total** | **19.89 MB** for `marine_bcoc` | **0.914 MB** for all four cases and all four modes |
+| **total** | **19.89 MB** for `marine_bcoc` | see below |
 
-A factor of about 84 measured across all four cases (76.8 MB of CSV against
-0.914 MB of `.npz`); the single-case row above is `marine_bcoc`, the largest.
+**The current sizes live in `docs/REFERENCE_BUILD.md`, which
+`tests/test_goldens_manifest.py` re-derives from the committed archives.** At
+the time of writing they are 938,271 bytes against 81.3 MB of CSV, a factor of
+about 89, and the single-case row above is `marine_bcoc`, the largest.
 
-Was 0.78 MB and a factor of 99 when this was written, and correct then.
-Commit `52db7d3` gave the state-dump records unique keys, which regrew them by
-~18%, and three separate documents kept quoting the old figure. Re-measure
-before quoting this rather than copying it forward -- and see
-`tests/test_goldens_manifest.py`, which asserts the size budgets so the
-decision is re-opened by a failing test rather than by someone noticing.
+They are quoted there and not here on purpose. This ADR said 0.78 MB and a
+factor of 99, correct when written; `52db7d3` gave the state-dump records
+unique keys and regrew them ~18%, and *four* documents went on quoting the old
+number, then briefly disagreed with each other about the new one because two
+of us measured different sets — sixteen `f64` archives against all twenty. One
+document owns the figure, one test pins it, everything else points at it.
+
+The decision itself does not turn on the third significant figure: the
+per-file (5 MB) and whole-set (25 MB) budgets asserted in
+`tests/test_goldens_manifest.py` are what would reopen it, and a multi-box
+capture is the likely trigger.
 Three things do the work, and all three are properties of
 this data rather than of compression in general: the long-format dumps repeat a
 small vocabulary of `site`, `field` and `tag` labels over hundreds of thousands

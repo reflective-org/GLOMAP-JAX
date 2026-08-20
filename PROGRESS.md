@@ -140,7 +140,7 @@ asserted over the committed branch-dump goldens.
 that is easy to leave implicit — what each one cannot.
 
 **Fixture size (task 16, and most of task 18's answer).** The complete golden
-set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.914 MB** as
+set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.94 MB** as
 compressed `.npz`, against roughly 70 MB of CSV from the reference. The state
 dump is the bulk of it at 321k rows per case (367k for `bl_nmts3`), and
 compresses to 0.16-0.28 MB once
@@ -278,6 +278,81 @@ out-of-range value silently leaves `rhocomp(cp_bc)` at its literal instead of
 failing — reproduced, not corrected, and captured as the `bc_oob` golden. And
 `i_tune_bc` is inert unless `l_radaer` is on, which the box model defaults off,
 so BC density tuning is unreachable by default.
+
+### Phase C review
+
+Four adversarial agents, one per dimension: the ported data against a
+from-scratch re-derivation, tests that cannot fail, every factual claim, and
+the capture harness. Roughly 60 findings; the fixes ran as four more agents in
+parallel worktrees. **1330 tests pass**, CI green on ubuntu x86_64 and macOS
+arm64.
+
+**The data itself is right.** An independent re-derivation — its own parsers,
+not this repo's extractors — found zero mismatches on 7 setups x 18 mode-literal
+tables, 4 gas routines x 175 fields, 7 setups x 283 budget names, and
+`coag_mode`. Nothing derived is copied: `_mode_literals.py` holds only what is
+a literal in the Fortran, and no module under `src/` opens a `.npz`. Float
+ordering, switch ordering and index-base conversion all clean.
+
+What the review was for is everything around it.
+
+**One finding would have changed a number.** `coag_mode.py` said up to eight
+`mtran` terms reach `mtrantoi[:, 3, icp]` but "four in any configuration the
+box model can actually run", and a test pinned that. `l_dust_mp_ageing` is a
+`box_aerosol` namelist variable that `validate_config` does not constrain, so
+eight is reachable — and the docstring listed that very row four paragraphs
+above, under "reachable configurations". Unrolling four adds instead of eight
+drops four terms. Third wrong reachability claim in this project, same root
+cause each time: asserting what is reachable without measuring it.
+
+**Verification that could not fail.** Mutation testing, 34 mutations, each
+reverted: three staleness gates passed when stubbed to compare nothing, and
+they guard 4,155 lines of generated literals. The gas anti-collapse guard —
+"the check that catches a capture which silently ran one setup seven times" —
+keyed on `ntraer` and `nbudaer`, the only two of 176 scalars that differ
+between `soto3` and `soto6`, and both mode-side. The four tests pinned "so a
+simplification fails with a reason" never called the function they named, so
+all four simplifications left them green while reddening 56-77 others. All
+fixed, each proven by watching the mutation go red.
+
+**A third evasion of the additive-only gate.** The awk arms itself on a `+++`
+header, which exists only in unified diffs, and `patch` was invoked with no
+format flag. A context diff and a normal diff each deleted a science line from
+`src/ukca/` with the gate exiting 0. The gate now refuses anything that is not
+a unified diff, `patch -u` stops auto-detection, and — this is the part that
+had been missing through three rounds of hardening — the gate has tests, ten
+of them, unmarked so they run in CI.
+
+**Byte equality is a property of a platform pair.** Six leaf comparisons failed
+on x86_64 against goldens captured on arm64: `erf` by up to 4 ulp, the powers
+by 1. The job that found it has no gfortran, so it was comparing this
+platform's JAX against another platform's Fortran — which
+`goldens_manifest.py`'s own docstring has called invalid since it was written,
+while `build_reference.sh` recorded `uname` all along and nothing read either.
+Worse, a same-machine gate is not reproducible either: `linux-reference`
+passed, failed and passed again across three runs of identical code, because
+XLA-CPU lowers f64 `erf` and `pow` to the host libm and glibc's path depends on
+the runner's CPU. Bit equality is now required where the goldens were captured
+and bounded elsewhere, with the bounds measured per primitive, and the Linux
+job reports the achieved agreement instead of asserting one.
+
+**The leaf sweep's own inputs went through libm.** The grids were built with
+`np.logspace`, which is `10.0 ** linspace(...)`, so four abscissae were a ulp
+off the correctly-rounded value — the *sample points* were platform-dependent,
+not just the results. Decimal literals and integer cubes now.
+
+**Documentation.** Thirteen wrong claims, eight stale, six cross-document
+contradictions. The float32 underflow argument that ADR-001 has recorded as
+false since phase A survived its **fourth** review, in `CLAUDE.md`. "`np.cbrt`
+disagrees by a hundred times `RTOL_ALGEBRAIC`" was in four places and is 0.13
+times it — the rule stands on the branch flip, not the magnitude. `CLAUDE.md`
+credited two guarantees to tests that do not exist. The UP-defect counts
+disagreed three ways; they are derived from the table now, and prose that
+drifts fails.
+
+Filed rather than fixed: #19 (uninitialised index variables), #20 (dead
+`ukca_mode_allcp_4mode`, where citations drift), #21 (ADR-008's benchmark is
+not committed, so its table cannot be re-derived).
 
 ## Phases D–K — physics: not started
 
