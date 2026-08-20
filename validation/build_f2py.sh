@@ -97,6 +97,7 @@ cd "$OUT/_build"
 PATH="$(dirname "$PY"):$PATH" "$PY" -m numpy.f2py \
   -c "$OUT/glomap_f2py_mod.F90" "$OUT/glomap_leaf_mod.F90" "$OUT/glomap_modes_mod.F90" \
   "$OUT/glomap_gasidx_mod.F90" \
+  "$OUT/glomap_coagmode_mod.F90" \
   -m "$MODULE" \
   --f90flags="$FCFLAGS -I$FORTRAN/$BUILD" \
   -I"$FORTRAN/$BUILD" \
