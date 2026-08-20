@@ -172,12 +172,15 @@ def assert_matches_reference(actual, expected, what, ulp=CROSS_PLATFORM_ULP):
         return
 
     off = ~within
+    gap = np.abs(actual[off] - expected[off]) / np.spacing(np.abs(expected[off]))
+    worst = np.argmax(gap)
     raise AssertionError(
         f"{what}: {off.sum()} of {off.size} points differ from the reference by "
         f"more than {ulp} ulp.\nThe goldens were captured on "
         f"{capture_platform()!r} and this is "
         f"{platform.system()} {platform.machine()}, so a small gap is expected "
         f"and a large one is a porting error.\n"
-        f"max relative difference among violations: "
-        f"{np.max(np.abs((actual[off] - expected[off]) / expected[off])):.3e}"
+        f"worst: {gap[worst]:.1f} ulp, expected {expected[off][worst]!r}, "
+        f"got {actual[off][worst]!r}\n"
+        f"all violations, in ulp: {np.sort(gap)[::-1][:12]}"
     )
