@@ -34,11 +34,17 @@ A capture that returns the same bytes for every setup is exactly the shape of
 the failure this repo has already shipped once: a replacement no-op'd, every
 setup got the same record, and every byte-equality test passed. Here the
 identical bytes are the *expected* result, which makes that failure invisible —
-so the archive also carries `mode`, `topmode` and `ncp` per setup, which
-genuinely do vary. `tests/test_coag_mode.py` asserts both directions:
-`coag_mode` identical across all seven setups, and the witness fields *not*
-identical. A capture that ran setup 1 seven times fails the second, here and in
-the test.
+so the archive also carries `mode`, `topmode` and `ncp` per setup, and each
+subprocess reads `i_mode_setup` back out of the Fortran through `wrap_sizes`
+before it returns a record.
+
+Of those three fields only `mode` varies across the seven supported setups:
+`topmode` is 5 and `ncp` is 6 in every one of them, so they are cross-checks on
+the accessors rather than witnesses. `mode` takes four distinct values —
+{1,3,5}, {2,4}, {6}, {8} — which is what both the guard below and
+`tests/test_coag_mode.py` require. A capture that ran setup 1 seven times gets
+one value, and fails here before the archive is written as well as in the test
+afterwards.
 
 ONE SUBPROCESS PER SETUP. `ukca_mode_setup` allocates under
 `IF (.NOT. ALLOCATED)` and never deallocates and the 283 `nmas*` budget indices
@@ -71,6 +77,11 @@ ARCHIVE = "coagmode.f64.tables.npz"
 
 SETUPS = (1, 2, 3, 4, 5, 6, 8)
 NMODES = 8
+
+# The seven setups produce four distinct `mode` patterns: {1,3,5}, {2,4}, {6},
+# {8}. Asserted at capture time by `main` and again on the committed archive by
+# `tests/test_coag_mode.py::test_the_capture_actually_varied_the_setup`.
+DISTINCT_MODE_PATTERNS = 4
 
 # ---------------------------------------------------------------------------
 # Reading 1: the vendored source text.
@@ -204,13 +215,26 @@ if out["setup"] is not None:
     assert e == 0, ("wrap_coag_mode after init", e)
     out["coag_mode_after_init"] = [[int(v) for v in row] for row in table2]
 
-    # The witness fields: these DO vary by setup, so a capture that silently ran
-    # the same setup every time is detectable.
+    sizes = g.wrap_sizes()
+    assert sizes[-1] == 0, ("wrap_sizes", sizes[-1])
+    # The Fortran's own opinion of which setup it is running. The namelist edit
+    # above counts its own match, but that is a check on the text; this is the
+    # one that fails if the text was right and the setup still did not take.
+    assert int(sizes[7]) == out["setup"], ("wrong setup", int(sizes[7]), out["setup"])
+
+    # The witness fields: `mode` varies by setup, so a capture that silently ran
+    # the same setup every time is detectable. topmode and ncp are captured with
+    # it as a cross-check on the accessors, not as witnesses -- across these
+    # seven setups they are constant (5 and 6).
     mode, e = g.wrap_mode_int("mode", nmodes)
     assert e == 0, ("mode", e)
     out["mode"] = [int(x) for x in mode]
-    out["topmode"] = int(g.wrap_topmode()[0])
-    out["ncp"] = int(g.wrap_sizes()[2])
+    # wrap_topmode returns out = 0 alongside ierr = 4 when it is uninitialised,
+    # so dropping the ierr would turn "never ran" into a plausible integer.
+    topmode, e = g.wrap_topmode()
+    assert e == 0, ("wrap_topmode", e)
+    out["topmode"] = int(topmode)
+    out["ncp"] = int(sizes[2])
 
 print("@@RESULT@@" + json.dumps(out))
 """
@@ -299,13 +323,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # The guard against a capture that quietly ran one setup seven times. The
     # table being invariant is the finding; the witnesses being invariant would
-    # mean the capture never varied its input.
-    if len(set(witnesses)) < 2:
+    # mean the capture never varied its input. Only `mode` varies across these
+    # setups, into the four groups named in the module docstring, so that is
+    # what is required -- "more than one distinct witness" would still pass on a
+    # capture that got six of the seven setups wrong.
+    patterns = {w[0] for w in witnesses}
+    if len(patterns) != DISTINCT_MODE_PATTERNS:
         raise SystemExit(
-            "every setup returned the same mode/topmode/ncp -- the capture did not "
-            "actually vary i_mode_setup, so the invariance of coag_mode proves nothing"
+            f"the {len(SETUPS)} setups produced {len(patterns)} distinct active-mode "
+            f"patterns, expected {DISTINCT_MODE_PATTERNS} -- the capture did not vary "
+            "i_mode_setup as intended, so the invariance of coag_mode proves nothing"
         )
-    print(f"  witness : {len(set(witnesses))} distinct (mode, topmode, ncp) across setups")
+    print(f"  witness : {len(patterns)} distinct active-mode patterns across setups")
 
     arrays["_case"] = np.array("coagmode")
     arrays["_mode"] = np.array("tables")

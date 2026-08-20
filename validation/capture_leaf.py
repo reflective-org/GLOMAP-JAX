@@ -31,6 +31,34 @@ each grid is built to land on the hazard rather than near it:
   even. `ukca_vapour.F90:226` computes `(NINT(wts/5))*5` with `wts` clamped to
   `[41, 99]`, so `wts = 42.5, 47.5, …` land exactly on ties. Both the bare
   intrinsic and the live idiom are swept.
+
+The grids are exactly reproducible
+----------------------------------
+
+The *results* of this sweep are platform-dependent — that is what it measures.
+The *inputs* must not be, or a re-capture on another machine moves the sample
+points as well as the answers, and the drift gate can no longer tell the two
+apart. So no grid point may come from a libm call.
+
+`np.logspace(a, b, n)` is `10.0 ** np.linspace(a, b, n)`, i.e. a libm `pow` per
+point, and it is not correctly rounded: on the arm64 capture platform 4 of the
+1801 points of the old `cubrt` grid came back 1 ulp away from the correctly
+rounded value, so a host with a correctly-rounded `pow` (glibc ≥ 2.28) would
+have produced different abscissae. The log-spaced grids are therefore built by
+`_decade_grid` out of decimal literals, whose conversion to binary IEEE 754
+requires to be correctly rounded, and the exact cubes are built with integer
+arithmetic. `linspace`, `arange`, `nextafter` and `finfo` are all exact or
+correctly-rounded elementary operations and are used as they were.
+
+REGENERATION NEEDED: `tests/goldens/numerics.f64.leaf.npz` was captured before
+that change, with the `logspace` abscissae, so the golden and this script no
+longer describe the same grid — re-run `validation/capture_leaf.py` on the
+pinned toolchain and re-write the manifest. Expect a drift report naming
+`cubrt`, `log`, `oneover` and `pow` (whose grid is `cubrt`'s), `_x` and `_y`
+alike, and nothing else: `erf`, `exp`, `nint` and `vapour_round` are built from
+`linspace` and `arange` and do not move. Every grid keeps its point count and
+every point moved by less than 0.4%, so a drift larger than that, or in another
+array, is a different change and not this one.
 """
 
 from __future__ import annotations
@@ -52,6 +80,53 @@ ARCHIVE = "numerics.f64.leaf.npz"
 # `oneover_v` exists separately and the two should be compared.
 POW_EXPONENTS = (1.0 / 3.0, 2.0 / 3.0, 0.5, 3.0, -1.0)
 
+# Mantissas for a decade-based log grid, as decimal STRINGS: `10 ** (i/30)` and
+# `10 ** (i/4)` rounded to three significant figures. Strings, because the point
+# is to keep libm out of the abscissae -- `float("1.08e-30")` is a
+# decimal-to-binary conversion, which IEEE 754 requires to be correctly rounded,
+# so every machine parses it to the same double. See the module docstring.
+DECADE_30 = (
+    "1.00", "1.08", "1.17", "1.26", "1.36", "1.47", "1.58", "1.71", "1.85", "2.00",
+    "2.15", "2.33", "2.51", "2.71", "2.93", "3.16", "3.41", "3.69", "3.98", "4.30",
+    "4.64", "5.01", "5.41", "5.84", "6.31", "6.81", "7.36", "7.94", "8.58", "9.26",
+)  # fmt: skip
+DECADE_4 = ("1.00", "1.78", "3.16", "5.62")
+
+# The log-spaced grids, as (first decade, last decade, mantissas). Named here
+# rather than inline so `tests/test_capture_scripts.py` can check every point of
+# every one of them against the short-decimal property.
+LOG_GRIDS: dict[str, tuple[int, int, tuple[str, ...]]] = {
+    "cubrt": (-30, 30, DECADE_30),
+    "log": (-300, 300, DECADE_4),
+    "oneover": (-150, 150, DECADE_4),
+}
+
+
+def _decade_grid(lo: int, hi: int, mantissas: tuple[str, ...]) -> np.ndarray:
+    """`len(mantissas)` points per decade from `1e{lo}` to `1e{hi}` inclusive.
+
+    The replacement for `np.logspace`, which reaches libm `pow` for every point
+    and so makes the *inputs* of the sweep platform-dependent. Every value here
+    is `float("<decimal literal>")`.
+    """
+    values = [float(f"{m}e{k}") for k in range(lo, hi) for m in mantissas]
+    values.append(float(f"1e{hi}"))
+    grid = np.array(values, dtype=np.float64)
+    if not (np.diff(grid) > 0).all():
+        raise AssertionError(f"decade grid 1e{lo}..1e{hi} is not strictly increasing")
+    return grid
+
+
+def _exact_cubes() -> np.ndarray:
+    """1, 8, 27, … 64**3, cubed in *integer* arithmetic.
+
+    `float(k) ** 3` is a libm `pow` call. It happens to be exact for these 64
+    values on every libm anyone has, but the whole point of this grid is that
+    an honest cube root returns an integer here, so the input had better be one
+    for a reason and not by luck.
+    """
+    return np.array([float(k**3) for k in range(1, 65)], dtype=np.float64)
+
 
 def _dense_through_zero() -> np.ndarray:
     """Zero, and approaches to it at every scale that matters.
@@ -66,7 +141,7 @@ def _dense_through_zero() -> np.ndarray:
 
 
 def grids() -> dict[str, np.ndarray]:
-    exact_cubes = np.array([float(k) ** 3 for k in range(1, 65)])
+    exact_cubes = _exact_cubes()
     return {
         "erf": np.unique(
             np.concatenate(
@@ -83,7 +158,7 @@ def grids() -> dict[str, np.ndarray]:
         "cubrt": np.unique(
             np.concatenate(
                 [
-                    np.logspace(-30.0, 30.0, 1801),
+                    _decade_grid(*LOG_GRIDS["cubrt"]),
                     exact_cubes,
                     [np.finfo(np.float64).tiny, np.finfo(np.float64).max],
                 ]
@@ -101,9 +176,11 @@ def grids() -> dict[str, np.ndarray]:
                 ]
             )
         ),
-        "log": np.unique(np.concatenate([np.logspace(-300.0, 300.0, 2401), [1.0], exact_cubes])),
+        "log": np.unique(np.concatenate([_decade_grid(*LOG_GRIDS["log"]), [1.0], exact_cubes])),
         "oneover": np.unique(
-            np.concatenate([np.logspace(-150.0, 150.0, 1201), -np.logspace(-150.0, 150.0, 1201)])
+            np.concatenate(
+                [_decade_grid(*LOG_GRIDS["oneover"]), -_decade_grid(*LOG_GRIDS["oneover"])]
+            )
         ),
         # Ties at every half-integer, and the two representable neighbours of
         # each tie -- a port that gets the tie right by accident but the
@@ -125,6 +202,38 @@ def grids() -> dict[str, np.ndarray]:
     }
 
 
+def check_no_ereport(before: tuple, after: tuple, what: str, last: tuple | None = None) -> None:
+    """The rule from `docs/harness.md`: every leaf driver checks the shim.
+
+    The shim returns where the real `ereport` would `STOP 1`, so a driver that
+    hit an error path returns a number rather than a crash, and the number is
+    meaningless. `wrap_init` and `wrap_step` already record the fatal count
+    before the call and compare after; leaf drivers must do the same.
+
+    All three counters, not just `fatal`: a warning during a sweep of pure
+    intrinsics would mean the driver is not calling what this script thinks it
+    is, which is exactly as much of a finding.
+
+    Split out from `capture` so it is testable without the built extension.
+    """
+    labels = ("fatal", "warning", "info")
+    moved = [
+        f"{name} +{int(a) - int(b)}"
+        for name, b, a in zip(labels, before, after)
+        if int(a) != int(b)
+    ]
+    if not moved:
+        return
+    detail = ""
+    if last is not None:
+        status, routine, message = last
+        for part in (routine, message):
+            text = part.decode() if isinstance(part, bytes) else str(part)
+            detail += f"\n  {text.strip()}"
+        detail = f"\n  status {int(status)}" + detail
+    raise SystemExit(f"{what} reached ereport ({', '.join(moved)}) -- the sweep is void{detail}")
+
+
 def capture(out_dir: Path, quiet: bool = False) -> Path:
     sys.path.insert(0, str(F2PY_DIR))
     try:
@@ -134,11 +243,21 @@ def capture(out_dir: Path, quiet: bool = False) -> Path:
             f"cannot import the binding ({exc}). Run: ./validation/build_f2py.sh"
         ) from None
 
+    def call(what: str, fn, *args):
+        """One driver call, with the shim counted either side of it."""
+        before = tuple(int(v) for v in g.wrap_ereport_count())
+        y = fn(*args)
+        after = tuple(int(v) for v in g.wrap_ereport_count())
+        check_no_ereport(before, after, what, g.wrap_ereport_last())
+        return y
+
+    g.wrap_ereport_reset()
+
     arrays: dict[str, np.ndarray] = {}
     for name, x in grids().items():
         driver = getattr(g, f"leaf_{name}")
         arrays[f"{name}_x"] = x
-        arrays[f"{name}_y"] = driver(x)
+        arrays[f"{name}_y"] = call(f"leaf_{name}", driver, x)
         if not quiet:
             print(f"  {name:<14} {len(x):>6,} points")
 
@@ -149,7 +268,9 @@ def capture(out_dir: Path, quiet: bool = False) -> Path:
     pow_x = grids()["cubrt"]
     arrays["pow_x"] = pow_x
     arrays["pow_exponents"] = np.array(POW_EXPONENTS)
-    arrays["pow_y"] = np.stack([g.leaf_pow(pow_x, p) for p in POW_EXPONENTS])
+    arrays["pow_y"] = np.stack(
+        [call(f"leaf_pow(p={p!r})", g.leaf_pow, pow_x, p) for p in POW_EXPONENTS]
+    )
     if not quiet:
         print(f"  {'pow':<14} {len(pow_x):>6,} points x {len(POW_EXPONENTS)} exponents")
 
@@ -161,7 +282,7 @@ def capture(out_dir: Path, quiet: bool = False) -> Path:
     # differ if it ever did.
     negatives = np.array([-1.0, -8.0, -1e-30, -1e30])
     arrays["cubrt_negative_x"] = negatives
-    arrays["cubrt_negative_y"] = g.leaf_cubrt(negatives)
+    arrays["cubrt_negative_y"] = call("leaf_cubrt(negative)", g.leaf_cubrt, negatives)
 
     arrays["_case"] = np.array("numerics")
     arrays["_mode"] = np.array("leaf")
