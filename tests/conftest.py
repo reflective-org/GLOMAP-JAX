@@ -116,6 +116,20 @@ def goldens_dir():
 
 CROSS_PLATFORM_ULP = 2
 
+# Per-primitive bounds, each one measured rather than chosen. Darwin arm64
+# (Homebrew gfortran 16.1.0, the capture platform) against ubuntu x86_64:
+#
+#   erf              2 of 4330 points past 2 ulp, worst 4 ulp at erf(x) = 0.4928
+#                    -- mid-range, not near zero, so it is glibc's erf against
+#                    Apple's and not a cancellation artefact
+#   x ** (1.0/3.0)   86 of 1865 differ, none past 1 ulp
+#   x ** p           1 of 1865 differs, 1 ulp
+#   log, 1/x         identical
+#
+# Exceeding one of these means look, not bump. The point of a measured bound is
+# that it moves only when someone re-measures and writes down what they found.
+CROSS_PLATFORM_ULP_BY_PRIMITIVE = {"erf": 4}
+
 _MANIFEST = Path(__file__).parent / "goldens" / "MANIFEST.json"
 
 

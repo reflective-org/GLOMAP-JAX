@@ -289,12 +289,18 @@ Darwin arm64 — and written up as though they were properties of `erf` and
 `**`. They are not. Ubuntu x86_64 CI, running the same tests against the same
 committed goldens, disagrees:
 
-| primitive | points differing | max relative |
+| primitive | points differing | worst gap |
 |---|---|---|
-| `erf` | 1521 / 4330 (35%) | 4.5e-16 (2 ulp) |
-| `x ** (1.0/3.0)` | 86 / 1865 (4.6%) | 2.2e-16 (1 ulp) |
-| `x ** p` (`powr_v`) | 1 / 1865 | 1.9e-16 |
+| `erf` | 1521 / 4330 (35%) | **4 ulp**, at `erf(x) = 0.4928` |
+| `x ** (1.0/3.0)` | 86 / 1865 (4.6%) | 1 ulp |
+| `x ** p` (`powr_v`) | 1 / 1865 | 1 ulp |
 | `log`, `1/x`, `nint`, `vapour_round` | 0 | — |
+
+`erf` is the outlier and only just: exactly two of its 4330 points exceed 2
+ulp, at 4 and 3, and both sit mid-range rather than near zero — so this is
+glibc's `erf` against Apple's, not a cancellation artefact at a small value.
+The bounds in `conftest.CROSS_PLATFORM_ULP_BY_PRIMITIVE` are those
+measurements. Exceeding one means look, not bump.
 
 Everything that differs is a libm transcendental; everything exact stays exact
 everywhere, which is the expected shape and a useful check that the failures

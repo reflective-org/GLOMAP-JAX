@@ -32,7 +32,11 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from conftest import RTOL_TRANSCENDENTAL, assert_matches_reference
+from conftest import (
+    CROSS_PLATFORM_ULP_BY_PRIMITIVE,
+    RTOL_TRANSCENDENTAL,
+    assert_matches_reference,
+)
 
 GOLDEN = Path(__file__).parent / "goldens" / "numerics.f64.leaf.npz"
 
@@ -118,7 +122,9 @@ def test_jax_erf_is_bit_identical_to_gfortran(sweep):
     `newn > num_eps`, which needs `nd` within a factor of two of 1e-20 to
     matter. The branch risk the plan attributed here belongs to `cubrt_v`."""
     got = np.asarray(jax.scipy.special.erf(jnp.asarray(sweep["erf_x"])))
-    assert_matches_reference(got, sweep["erf_y"], "jax erf vs gfortran ERF")
+    assert_matches_reference(
+        got, sweep["erf_y"], "jax erf vs gfortran ERF", ulp=CROSS_PLATFORM_ULP_BY_PRIMITIVE["erf"]
+    )
 
 
 def test_jax_log_and_reciprocal_are_bit_identical_to_gfortran(sweep):

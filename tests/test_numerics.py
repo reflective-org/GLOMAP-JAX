@@ -19,7 +19,12 @@ import jax
 import numpy as np
 import pytest
 
-from conftest import CROSS_PLATFORM_ULP, RTOL_TRANSCENDENTAL, assert_matches_reference
+from conftest import (
+    CROSS_PLATFORM_ULP,
+    CROSS_PLATFORM_ULP_BY_PRIMITIVE,
+    RTOL_TRANSCENDENTAL,
+    assert_matches_reference,
+)
 from glomap_jax.config import FidelityConfig
 from glomap_jax.core import numerics
 
@@ -53,8 +58,11 @@ def test_matches_the_fortran_bit_for_bit(sweep, fn, key):
     re-establishes the strong claim on x86_64 by building gfortran there.
     """
     got = np.asarray(getattr(numerics, fn)(sweep[f"{key}_x"]))
-    exact_everywhere = 0 if fn in ("nint", "vapour_round") else CROSS_PLATFORM_ULP
-    assert_matches_reference(got, sweep[f"{key}_y"], f"{fn} vs {key}", ulp=exact_everywhere)
+    if fn in ("nint", "vapour_round"):
+        ulp = 0
+    else:
+        ulp = CROSS_PLATFORM_ULP_BY_PRIMITIVE.get(key, CROSS_PLATFORM_ULP)
+    assert_matches_reference(got, sweep[f"{key}_y"], f"{fn} vs {key}", ulp=ulp)
 
 
 def test_nint_survives_the_double_just_below_a_half(sweep):
