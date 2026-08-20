@@ -35,7 +35,7 @@ import goldens_manifest as gm  # noqa: E402
 CASES = ["bl_nmts3", "boundary_layer", "free_troposphere", "marine_bcoc"]
 MODES = ["trajectory", "budgets", "state", "branches"]
 # Leaf sweeps (task 21): not per-case, and not produced by the box binary.
-LEAF_ARCHIVES = {"numerics.f64.leaf.npz", "modes.f64.tables.npz"}
+LEAF_ARCHIVES = {"numerics.f64.leaf.npz", "modes.f64.tables.npz", "gasidx.f64.tables.npz"}
 
 # Task 13. The floor is a property of the trajectory over 48 steps of 1800 s.
 PRECISION_FLOOR = 3.7e-4
