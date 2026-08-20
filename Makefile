@@ -55,6 +55,7 @@ goldens:
 	$(PY) validation/capture_reference.py
 	$(PY) validation/capture_leaf.py
 	$(PY) validation/capture_modes.py
+	$(PY) validation/capture_gas_indices.py
 	$(PY) validation/goldens_manifest.py --write
 
 bench:
