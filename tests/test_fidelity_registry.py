@@ -59,7 +59,6 @@ NOT_YET_CONSUMED = {
     "drydiam_undersize_reset",  # phase D, task 37
     "l_fix_ukca_water_content",  # phase D, task 40
     "l_fix_neg_pvol_wat",  # phase D, task 38
-    "l_fix_ukca_hygroscopicities",  # phase C, task 30
     "checkmd_nd",  # phase I, task 79
     "iextra_checks",  # phase H, task 71
     "cbrt_exact",  # phase D, task 36 -- numerics.cbrt takes it as an argument
