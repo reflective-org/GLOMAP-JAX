@@ -38,9 +38,48 @@ def test_the_committed_file_is_not_stale(freshly_extracted):
 def test_the_check_mode_agrees(capsys):
     """`--check` is what a future CI job would run. It compares the DATA, not
     the bytes: `ruff format` reformats the generated file after it is written,
-    so a byte comparison would report every formatted file as stale."""
+    so a byte comparison would report every formatted file as stale.
+
+    On its own this says nothing: exit 0 and "up to date" are both true of a
+    gate that compares nothing. The two tests below are the ones that make it
+    a gate — see their docstrings.
+    """
     assert extractor.main(["--check"]) == 0
     assert "up to date" in capsys.readouterr().out
+
+
+def test_the_check_mode_rejects_a_doctored_file(tmp_path, monkeypatch, capsys):
+    """The half of `--check` the passing case cannot reach.
+
+    Measured, not assumed: replacing the comparison at
+    `extract_mode_literals.py:189` with `if False:` leaves the whole suite
+    green without this test. `test_the_committed_file_is_not_stale` compares
+    the same data, but nothing exercised the *gate* — and the gate is what a
+    CI job runs. So the extractor is pointed at a copy of its own output with
+    one number changed in one table of one setup, and it has to say so.
+    """
+    doctored = tmp_path / "_mode_literals.py"
+    data = extractor.extract()
+    data[1]["sigmag"][0] += 0.5
+    doctored.write_text(extractor.render(data), encoding="utf-8")
+
+    monkeypatch.setattr(extractor, "REPO", tmp_path)
+    monkeypatch.setattr(extractor, "TARGET", doctored)
+    assert extractor.main(["--check"]) == 1
+    out = capsys.readouterr().out
+    assert "regenerate it" in out
+    assert "up to date" not in out
+
+
+def test_the_check_mode_rejects_a_missing_file(tmp_path, monkeypatch, capsys):
+    """A deleted generated file is stale, not up to date. Separate from the
+    doctored case because it is a separate branch, and the failure it stands
+    for — a `--check` run before the first `--emit` — is the one a CI job hits
+    first."""
+    monkeypatch.setattr(extractor, "REPO", tmp_path)
+    monkeypatch.setattr(extractor, "TARGET", tmp_path / "_mode_literals.py")
+    assert extractor.main(["--check"]) == 1
+    assert "does not exist" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("setup", sorted(extractor.ROUTINES))

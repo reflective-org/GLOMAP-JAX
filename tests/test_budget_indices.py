@@ -29,6 +29,8 @@ cannot fail is worse than none:
   `test_the_f90_accessor_lists_exactly_the_declared_names`.
 """
 
+import copy
+import dataclasses
 import re
 import sys
 from pathlib import Path
@@ -123,9 +125,55 @@ def test_the_committed_literals_are_not_stale(parsed):
 
 def test_the_check_mode_agrees(capsys):
     """What a future CI job would run. Compares the DATA, not the bytes: `ruff
-    format` reformats the generated file after it is written."""
+    format` reformats the generated file after it is written.
+
+    The passing case only. Exit 0 and "up to date" are equally true of a gate
+    that compares nothing — measured, by replacing the `check_literals(parsed)`
+    call with `print("up to date"); return 0` and watching every other test in
+    this file stay green. The failing path is the next two tests.
+    """
     assert capture.main(["--check-literals"]) == 0
     assert "up to date" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("doctor", ("names", "nbudaer", "slots"))
+def test_the_check_mode_rejects_a_doctored_file(tmp_path, monkeypatch, capsys, doctor):
+    """`--check-literals` pointed at a copy of its own output, doctored.
+
+    One case per clause of the comparison, because `check_literals` is a single
+    `or` over three of them and a dropped clause is invisible otherwise: a name
+    changed (the map shifts), an `nbudaer` changed (the array width moves) and
+    one slot changed (a flux moves column). Measured: keeping only the first
+    clause leaves the other two cases failing and this one green.
+    """
+    parsed = copy.deepcopy(capture.extract())
+    if doctor == "nbudaer":
+        parsed[1]["nbudaer"] += 1
+    elif doctor == "slots":
+        parsed[1]["slots"]["nmasprimsuaitsol"] = 0
+
+    text = capture.render_literals(parsed)
+    if doctor == "names":
+        text = text.replace("'nmasprimsuaitsol'", "'nmasprimsuaitsoq'", 1)
+        assert "nmasprimsuaitsoq" in text, "the doctoring did not match"
+
+    doctored = tmp_path / "_budget_index_literals.py"
+    doctored.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(capture, "REPO", tmp_path)
+    monkeypatch.setattr(capture, "LITERALS", doctored)
+
+    assert capture.main(["--check-literals"]) == 1
+    out = capsys.readouterr().out
+    assert "regenerate it" in out
+    assert "up to date" not in out
+
+
+def test_the_check_mode_rejects_a_missing_file(tmp_path, monkeypatch, capsys):
+    """A generated file that is not there is stale, not up to date."""
+    monkeypatch.setattr(capture, "REPO", tmp_path)
+    monkeypatch.setattr(capture, "LITERALS", tmp_path / "_budget_index_literals.py")
+    assert capture.main(["--check-literals"]) == 1
+    assert "does not exist" in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -198,22 +246,26 @@ def test_setup_6_is_the_sparse_one_and_setup_8_the_full_one(golden):
 def test_the_carried_slots_are_exactly_one_to_nbudaer(golden, setup):
     """A bijection onto 1..nbudaer: no duplicate, no gap, no overrun. It is the
     strongest statement available about the map without naming numbers, and it
-    fails on the three ways a hand-maintained index table goes wrong."""
+    fails on the three ways a hand-maintained index table goes wrong.
+
+    THIS IS ALSO THE SLOT-0 CHECK. A `test_no_name_maps_to_slot_zero` used to
+    sit here asserting `m.slot(name) >= 1` for every `m.carried_names()`; it
+    was a tautology, because `carried` is *defined* as `slots > 0` and the
+    names come from it, so it held for any data whatever. In the data there is
+    no difference to find: "maps to slot 0" and "is not carried" are the same
+    number. What can be checked is what this test checks — that the values
+    above 0 tile 1..nbudaer exactly and that 0 is the only other value, on the
+    golden. The empirical half, that column 0 of a real run stays zero, is
+    `test_the_budget_goldens_are_nbudaer_plus_one_columns_wide` and
+    `tests/test_goldens.py`; the definition itself is pinned by
+    `test_build_reproduces_the_golden`, which compares `carried` against
+    `golden > 0`.
+    """
     values = [int(v) for v in golden[f"s{setup}_values"]]
     nbudaer = int(golden[f"s{setup}_nbudaer"])
     assert sorted(v for v in values if v > 0) == list(range(1, nbudaer + 1))
     assert min(values) == 0
-
-
-@pytest.mark.parametrize("setup", SETUPS)
-def test_no_name_maps_to_slot_zero(golden, setup):
-    """Slot 0 is a hole. A name mapping *to* it would be a name whose flux is
-    accumulated into the column the Fortran never writes — the exact confusion
-    between "not carried" and "carried at index 0" that this map exists to keep
-    apart."""
-    m = bi.build(setup)
-    for name in m.carried_names():
-        assert m.slot(name) >= 1
+    assert values.count(0) == len(BUDGET_NAMES) - nbudaer
 
 
 def test_the_mp_names_are_carried_by_no_supported_setup(golden, parsed):
@@ -365,6 +417,52 @@ def test_name_of_is_the_inverse_of_slot():
             m.name_of(0)
         with pytest.raises(ValueError):
             m.name_of(m.nbudaer + 1)
+
+
+def test_declaration_order_is_already_slot_order_in_all_seven_setups(golden):
+    """Measured, and the reason the test below has to build its own map.
+
+    Every one of the seven routines assigns its slots in declaration order, so
+    the `np.argsort` in `carried_names` never reorders anything: delete it and
+    all of this file still passes. That is a property of the vendored tables,
+    not of the port, so it is recorded as a measurement. If it ever fails, the
+    sort has started to matter on real data and the next test stops being the
+    only thing holding it.
+    """
+    for setup in SETUPS:
+        carried = [int(v) for v in golden[f"s{setup}_values"] if v > 0]
+        assert carried == sorted(carried), f"setup {setup}: slots are not in declaration order"
+
+
+def test_carried_names_is_slot_order_not_declaration_order():
+    """The guarantee `carried_names()` documents, on the only kind of map that
+    can tell the two orders apart — a constructed one, since no supported setup
+    does (see above).
+
+    Setup 6's eight carried slots are reversed in place, so declaration order
+    is now the exact opposite of slot order. `name_of` is the independent
+    check: it locates a slot by searching the values, so it does not use the
+    ordering under test.
+
+    Kept rather than dropped along with the sort because `carried_names()[k-1]`
+    is what names budget column `k` — `name_of`'s inverse test above and the
+    golden column check at the end of this file both rely on it — and a
+    vendored update that assigned out of declaration order would relabel every
+    column after the first divergence with no other test noticing.
+    """
+    m = bi.build(6)
+    slots = m.slots.copy()
+    positions = np.nonzero(slots > 0)[0]
+    slots[positions] = slots[positions][::-1]
+    permuted = dataclasses.replace(m, slots=slots, carried=slots > 0)
+
+    declaration_order = tuple(np.asarray(permuted.names)[permuted.carried])
+    got = permuted.carried_names()
+    assert len(got) == permuted.nbudaer == 8
+    assert got == declaration_order[::-1] != declaration_order
+    for k, name in enumerate(got, start=1):
+        assert permuted.slot(name) == k
+        assert permuted.name_of(k) == name
 
 
 # ---------------------------------------------------------------------------

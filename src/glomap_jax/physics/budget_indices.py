@@ -108,7 +108,21 @@ class BudgetIndexMap:
 
     def carried_names(self) -> tuple[str, ...]:
         """The names this setup carries, in slot order — so `carried_names()[k]`
-        is the name of slot `k + 1`."""
+        is the name of slot `k + 1`.
+
+        The sort is a no-op on every table this port ships: in all seven
+        supported setups each routine assigns its slots in declaration order,
+        so `self.names[self.carried]` is already sorted
+        (`test_declaration_order_is_already_slot_order_in_all_seven_setups`
+        measures it). It is kept anyway, because the guarantee in the first
+        line is what labels a budget column — `name_of` and the column checks
+        in `tests/test_budget_indices.py` both read `carried_names()[k - 1]` as
+        the name of column `k` — and a vendored update that assigned out of
+        declaration order would otherwise mislabel every column from the first
+        divergence on, silently. Deleting the sort leaves the whole suite green
+        on today's data, so it is pinned on a deliberately permuted map instead
+        (`test_carried_names_is_slot_order_not_declaration_order`).
+        """
         order = np.argsort(self.slots[self.carried], kind="stable")
         return tuple(np.asarray(self.names)[self.carried][order])
 

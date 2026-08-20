@@ -74,7 +74,8 @@ ROUTINES = {
 }
 
 # The 38 nmas*mp* names are assigned by ukca_indices_sussbcocdump_8mode alone
-# (setup 14, which the box model does not implement), so in all seven supported
+# (setup 13 -- `i_sussbcocdump_8mode = 13`, ukca_config_specification_mod.F90:593
+# -- which the box model does not implement), so in all seven supported
 # setups they are READ WITHOUT EVER HAVING BEEN ASSIGNED -- 34 of them from a
 # live `IF (nmasxxx > 0)` guard. Module scalars have static storage, so gfortran
 # puts them in .bss and they read as 0, which makes every one of those guards
@@ -214,16 +215,29 @@ def capture_one(setup: int) -> dict:
         values, nbudaer, e = g.wrap_bud_values(nnames); assert e == 0, e
         assert nbudaer == nbudaer_sizes, (nbudaer, nbudaer_sizes)
 
-        # Prove the blob order IS the value order rather than assuming it.
-        # wrap_bud_index looks a name up by string and reports both its slot
-        # and its position; if the two arrays were misaligned by even one
-        # entry this disagrees. Every name, not a sample: a spot check on the
-        # first and last would pass through a rotation of the middle.
+        # Every name is findable by string, at the position the blob gave it.
+        # That catches a duplicated blob entry (the lookup returns the first
+        # match, so the second name reports the wrong position), an entry with
+        # a leading blank (Python strips both ends, Fortran TRIM only the
+        # right, so it stops matching at all), and any name wrap_bud_index's
+        # own dispatch cannot resolve -- which is the path the ierr = 3 check
+        # below relies on.
+        #
+        # It does NOT prove the blob order is the value order, and an earlier
+        # version of this comment claimed that it did. wrap_bud_index gets its
+        # names from wrap_bud_names and its value from wrap_bud_values, the
+        # same two calls that produced `names` and `values` here, so
+        # `values(o_pos) == values[i]` compares an array with itself.
+        # Alignment is established outside this process, against a third
+        # route: check_capture() compares this name list with declared_names()
+        # from the source text, and
+        # tests/test_budget_indices.py::test_the_f90_accessor_lists_exactly_the_declared_names
+        # compares the accessor's USE list -- the thing that fills `values` --
+        # with the same declarations.
         for i, nm in enumerate(names):
-            v, pos, e = g.wrap_bud_index(nm)
+            _, pos, e = g.wrap_bud_index(nm)
             assert e == 0, (nm, e)
             assert pos == i + 1, (nm, pos, i + 1)
-            assert v == int(values[i]), (nm, v, int(values[i]))
         v, pos, e = g.wrap_bud_index('nmasnosuchname')
         assert (e, v, pos) == (3, 0, 0), (e, v, pos)
 

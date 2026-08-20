@@ -12,6 +12,13 @@ Three things are being checked here, and they fail for different reasons:
 
 No `fortran` marker anywhere: the golden is committed and everything else
 reads source text, so all of this runs in CI without a toolchain.
+
+Seven setups, four routines, THREE scalar tables. Worth knowing before reading
+any `@parametrize("setup", SETUPS)` below: the gas side collapses twice over.
+Four routines serve seven setups, and two of those four — `soto3` and `soto6` —
+agree on every gas scalar and every array except `condensable_choice`, so a
+7-way parametrisation over gas scalars exercises three distinct tables. See
+`ROUTINE_GROUPS` and `test_the_gas_scalars_alone_collapse_to_three_tables`.
 """
 
 import re
@@ -35,12 +42,29 @@ SETUPS = (1, 2, 3, 4, 5, 6, 8)
 
 # The four gas routines, as setup groups. Written out rather than derived, so
 # a change to `init_indices`'s pairing has to be made in two places.
+#
+# FOUR GROUPS, THREE SCALAR TABLES. Measured, and it is the thing most likely
+# to mislead a reader of this file: excluding the two mode-side scalars below,
+# the seven setups yield THREE distinct gas scalar tables -- {1}, {2,3,4,5,8}
+# and {6} -- because `soto3` and `soto6` agree on all 174 gas-side scalars and
+# on `mm_gas`, `dimen` and `condensable`. The four-way split is observable in
+# `condensable_choice` alone, at the single `Sec_Org` slot
+# (`test_soto3_and_soto6_differ_in_exactly_one_number`). So the 7-way
+# parametrisations in this file are really 3-way plus one entry, and any guard
+# meant to catch a collapsed capture has to include `condensable_choice` or it
+# is blind to setups 4 and 5 running soto3.
 ROUTINE_GROUPS = {
     "ukca_indices_sv1": (1,),
     "ukca_indices_orgv1_soto3": (2, 3, 8),
     "ukca_indices_orgv1_soto6": (4, 5),
     "ukca_indices_nochem": (6,),
 }
+
+# Captured into the gas golden but NOT gas-side data: `ukca_setup_indices`
+# declares them, the *mode*-side routine sets them (see `gas_indices.py`'s
+# docstring and task 32), and they take a different value in each of the seven
+# setups. Keying anything gas-phase on them measures the mode side.
+MODE_SIDE_SCALARS = ("ntraer", "nbudaer")
 
 REAL_ARRAYS = ("mm_gas", "dimen")
 INT_ARRAYS = ("condensable_choice", "condensable")
@@ -61,6 +85,22 @@ def golden_scalars(tables, names, setup):
     return dict(zip(names, (int(v) for v in tables[f"s{setup}_scalars"])))
 
 
+def gas_side_key(tables, names, setup):
+    """Everything the GAS routine sets, and nothing else, as a hashable key.
+
+    The two mode-side scalars are dropped, and `condensable_choice` is in —
+    without it the key cannot tell `soto3` from `soto6`, which is the whole
+    difference between them.
+    """
+    scalars = tuple(
+        int(v)
+        for n, v in zip(names, tables[f"s{setup}_scalars"], strict=True)
+        if n not in MODE_SIDE_SCALARS
+    )
+    arrays = tuple(tuple(tables[f"s{setup}_{f}"].tolist()) for f in REAL_ARRAYS + INT_ARRAYS)
+    return (scalars, arrays)
+
+
 # ---------------------------------------------------------------------------
 # 1. The generated literals against the vendored Fortran
 # ---------------------------------------------------------------------------
@@ -74,8 +114,46 @@ def test_the_committed_literals_are_not_stale():
 
 
 def test_the_check_mode_agrees(capsys):
+    """The passing half of `--check`, and on its own it proves nothing: exit 0
+    and "up to date" are equally true of a gate that compares nothing —
+    measured, by returning them from the top of the `--check` branch and
+    watching the whole suite stay green. The two tests below are the gate."""
     assert extractor.main(["--check"]) == 0
     assert "up to date" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("field", ("scalar", "array"))
+def test_the_check_mode_rejects_a_doctored_file(tmp_path, monkeypatch, capsys, field):
+    """`--check` pointed at a copy of its own output with one number changed.
+
+    Two doctorings because the comparison is one `!=` over a nested dict: a
+    scalar and one entry of a 50-long array, so a check that compared only the
+    top level, or only the scalars, fails here rather than reporting a
+    1544-line file that no longer describes the Fortran as up to date.
+    """
+    doctored = tmp_path / "_gas_literals.py"
+    data = extractor.extract()
+    if field == "scalar":
+        data["routines"]["ukca_indices_sv1"]["scalars"]["mh2so4"] += 1
+    else:
+        data["routines"]["ukca_indices_sv1"]["arrays"]["mm_gas"][7] += 1.0
+    doctored.write_text(extractor.render(data), encoding="utf-8")
+
+    monkeypatch.setattr(extractor, "REPO", tmp_path)
+    monkeypatch.setattr(extractor, "TARGET", doctored)
+    assert extractor.main(["--check"]) == 1
+    out = capsys.readouterr().out
+    assert "regenerate it" in out
+    assert "up to date" not in out
+
+
+def test_the_check_mode_rejects_a_missing_file(tmp_path, monkeypatch, capsys):
+    """A generated file that is not there is stale, not up to date — the state
+    a CI job hits before anyone has run the emitter."""
+    monkeypatch.setattr(extractor, "REPO", tmp_path)
+    monkeypatch.setattr(extractor, "TARGET", tmp_path / "_gas_literals.py")
+    assert extractor.main(["--check"]) == 1
+    assert "does not exist" in capsys.readouterr().out
 
 
 def test_continuations_are_joined_before_parsing():
@@ -291,6 +369,44 @@ def test_four_of_the_live_indices_are_absent_in_every_supported_setup():
         assert gas.build(setup).mh2o2f != gas.ABSENT
 
 
+def test_live_s0_is_the_use_only_closure_over_the_vendored_tree():
+    """`gas_indices._LIVE_S0` is a hand-maintained list of the S0 indices the
+    vendored tree actually reads, and it is what tells the next person which
+    of the 55 are load-bearing. Derived here instead of trusted.
+
+    It had no gate until now, and the provenance comment beside it had drifted:
+    it named `ukca_calcnucrate`, which does not `USE ukca_setup_indices` at
+    all, and omitted `ukca_coagwithnucl` and `glomap_box_output_mod`. The names
+    were right; nothing was checking the rest. So both halves are asserted —
+    the name set and the modules it comes from.
+    """
+    imported: dict[str, set[str]] = {}
+    for path in sorted((REPO / "fortran" / "src").rglob("*.F90")):
+        text = re.sub(r"!.*$", "", path.read_text(encoding="utf-8"), flags=re.MULTILINE)
+        text = re.sub(r"&\s*\n\s*", "", text)  # join continuations before matching
+        for match in re.finditer(r"USE\s+ukca_setup_indices\s*,\s*ONLY\s*:([^\n]*)", text, re.I):
+            for name in re.findall(r"[A-Za-z_]\w*", match.group(1)):
+                imported.setdefault(name.lower(), set()).add(path.name)
+
+    s0_names = set(GAS_LITERALS["groups"]["s0"])
+    live = {n: mods for n, mods in imported.items() if n in s0_names}
+    assert set(live) == set(gas._LIVE_S0)
+
+    assert {m for mods in live.values() for m in mods} == {
+        "glomap_box_output_mod.F90",
+        "glomap_box_state_mod.F90",
+        "ukca_aero_step.F90",
+        "ukca_coagwithnucl.F90",
+        "ukca_conden.F90",
+        "ukca_coarse_no3_mod.F90",
+        "ukca_fine_no3_mod.F90",
+        "ukca_wetox.F90",
+    }
+    # The module the old comment named, which imports nothing from here.
+    assert "ukca_calcnucrate.F90" not in {m for mods in imported.values() for m in mods}
+    assert (REPO / "fortran" / "src" / "ukca" / "ukca_calcnucrate.F90").is_file()
+
+
 def test_so2_is_index_zero_which_is_why_presence_is_not_a_positivity_test():
     """`msotwo = 1` in every chemistry setup, so 0-based it is 0. Any port that
     kept the Fortran's `IF (mxxx > 0)` idiom after converting would drop SO2
@@ -338,14 +454,61 @@ def test_setups_that_share_a_gas_routine_have_identical_tables():
 def test_the_four_gas_routines_are_pairwise_different(tables, scalar_names):
     """The check that catches a capture which silently ran one setup seven
     times. Written on the GOLDEN, not on the port: the port would agree with
-    itself whatever the Fortran did."""
+    itself whatever the Fortran did.
+
+    Keyed on `gas_side_key`, which is the correction to a guard that used to
+    key on the full scalar vector. That vector includes `ntraer` and `nbudaer`,
+    which are set by the *mode* routine and differ in all seven setups, and
+    they were the ONLY two of the 176 that separated `soto3` from `soto6` — so
+    a capture in which setups 4 and 5 ran soto3 on the gas side while the mode
+    side stayed right passed. Measured: doctoring the golden that way leaves
+    the old form green and this one red.
+    """
     reps = [m[0] for m in ROUTINE_GROUPS.values()]
     seen = {}
     for setup in reps:
-        key = tuple(int(v) for v in tables[f"s{setup}_scalars"])
-        assert key not in seen, f"setups {seen.get(key)} and {setup} captured the same table"
+        key = gas_side_key(tables, scalar_names, setup)
+        assert key not in seen, f"setups {seen.get(key)} and {setup} captured the same gas table"
         seen[key] = setup
     assert len(seen) == 4
+
+
+def test_the_gas_scalars_alone_collapse_to_three_tables(tables, scalar_names):
+    """Why the guard above has to reach past the scalars, stated as data.
+
+    Excluding the two mode-side scalars, the seven setups produce THREE
+    distinct scalar tables, not four: `soto3` and `soto6` are byte-identical
+    across all 174 of them. Every 7-way parametrisation over gas scalars in
+    this file is therefore really a 3-way one, and the fourth routine is
+    visible only in `condensable_choice`.
+    """
+    by_scalars: dict[tuple, list[int]] = {}
+    for setup in SETUPS:
+        key = tuple(
+            int(v)
+            for n, v in zip(scalar_names, tables[f"s{setup}_scalars"], strict=True)
+            if n not in MODE_SIDE_SCALARS
+        )
+        by_scalars.setdefault(key, []).append(setup)
+    assert sorted(by_scalars.values()) == [[1], [2, 3, 4, 5, 8], [6]]
+
+    # And the mode-side pair is what a full-vector key was really measuring:
+    # together they take seven distinct values. Not individually, though —
+    # `ntraer` is 20 in setups 2 and 5 alike, so it is `nbudaer` that carries
+    # the separation.
+    pairs = {
+        tuple(golden_scalars(tables, scalar_names, s)[n] for n in MODE_SIDE_SCALARS) for s in SETUPS
+    }
+    assert len(pairs) == len(SETUPS)
+    assert len({golden_scalars(tables, scalar_names, s)["ntraer"] for s in SETUPS}) == 6
+    assert len({golden_scalars(tables, scalar_names, s)["nbudaer"] for s in SETUPS}) == 7
+
+    # Adding condensable_choice, and only that, recovers the fourth group.
+    by_full: dict[tuple, list[int]] = {}
+    for setup in SETUPS:
+        by_full.setdefault(gas_side_key(tables, scalar_names, setup), []).append(setup)
+    assert sorted(by_full.values()) == [[1], [2, 3, 8], [4, 5], [6]]
+    assert sorted(by_full.values()) == sorted(list(m) for m in ROUTINE_GROUPS.values())
 
 
 def test_no_switch_reaches_the_gas_tables():
