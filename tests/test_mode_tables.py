@@ -9,9 +9,24 @@ model.
 This file checks the captured golden is a usable reference. The port itself
 (tasks 25-29) then compares against it with `array_equal`.
 
+**What the 231 tests here are.** 140 of them — 61% — are the two shape-only
+parametrisations `test_per_mode_tables_are_full_width` and
+`test_per_component_tables_match_ncp`, which assert `.shape` and nothing about
+any value. That is not a coverage gap: every value in this archive is gated by
+`tests/test_modes.py`, byte for byte, against the module that recomputes it.
+But the count is misleading if read as 231 checks on the numbers, so
+`test_the_shape_only_parametrisations_are_most_of_the_count` states the split
+and fails if it drifts.
+
+The same caution applies to "seven setups": 17 of the 23 captured array fields
+are byte-identical across all seven, so for those fields the seven setups are
+one reference value seen seven times. See
+`tests/test_modes.py::test_most_fields_are_identical_across_all_seven_setups`.
+
 No `fortran` marker — the golden is committed, so this runs in CI.
 """
 
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -60,13 +75,22 @@ def test_unsupported_setups_are_absent(tables):
 def test_per_mode_tables_are_full_width(tables, setup, field):
     """Eight entries always, even where only two modes are active. The array is
     `dimension(nmodes)` in the Fortran and inactive slots still carry values —
-    a port that stored only the active ones would silently change indexing."""
+    a port that stored only the active ones would silently change indexing.
+
+    Shape only, deliberately: 98 of this file's tests are this one. What the
+    entries *contain* is `tests/test_modes.py`'s job, byte for byte."""
     assert tables[f"s{setup}_{field}"].shape == (8,)
 
 
 @pytest.mark.parametrize("setup", SETUPS)
 @pytest.mark.parametrize("field", CP_REAL + CP_INT)
 def test_per_component_tables_match_ncp(tables, setup, field):
+    """The per-component half of the width check — 42 more shape-only tests.
+
+    Worth having separately from the per-mode one because the width is `ncp`,
+    a per-setup number, rather than the `nmodes` PARAMETER: a capture that
+    padded these to `ncp_max` would look right until something indexed past
+    `ncp`. Values, again, are gated in `tests/test_modes.py`."""
     assert tables[f"s{setup}_{field}"].shape == (int(tables[f"s{setup}_ncp"]),)
 
 
@@ -120,7 +144,7 @@ def test_the_dust_only_setup_has_no_soluble_modes(tables):
 @pytest.mark.parametrize("setup", SETUPS)
 def test_topmode_is_a_switch_not_the_highest_active_mode(tables, setup):
     """`topmode` reads like "highest active mode" and is not.
-    `ukca_mode_setup.F90:418-422` sets it to `nmodes` when `l_dust_mp_ageing`
+    `ukca_mode_setup.F90:623-627` sets it to `nmodes` when `l_dust_mp_ageing`
     and to `mode_ait_insol` (5) otherwise — regardless of `mode_choice`.
 
     The box model defaults the switch off, so it is 5 everywhere, *including*
@@ -174,13 +198,17 @@ def test_mfrac_0_rows_sum_to_one_for_active_modes(tables, setup):
 def test_present_components_are_a_subset_of_permitted_ones(tables, setup):
     """The two tables answer different questions, which is easy to miss:
     `component_mode` is which components are *allowed* in each mode
-    (`ukca_mode_setup.F90:369-372`, "allowed in nuc_sol"), while `component` is
+    (`ukca_mode_setup.F90:574-581`, "allowed in nuc_sol"), while `component` is
     which are actually *present* for this setup.
 
     So the invariant is containment, not equality. Asserting equality was my
-    first guess and it fails on five of the seven setups — a port that treated
-    them as interchangeable would grant components to modes that should not
-    carry them."""
+    first guess and it fails on **all seven** setups, not five as this said
+    until it was measured: `component_mode` permits 24 of the 48 slots in every
+    setup while `component` fills between 2 and 19. The partial readings are
+    the ones that survive a subset —
+    `tests/test_modes.py::test_component_needs_all_three_factors` has the
+    counts. A port that treated the two as interchangeable would grant
+    components to modes that should not carry them."""
     present = tables[f"s{setup}_component"].astype(bool)
     permitted = tables[f"s{setup}_component_mode"].astype(bool)
     violations = present & ~permitted
@@ -213,3 +241,46 @@ def test_setups_are_not_all_identical(tables):
     would still pass."""
     signatures = {s: tables[f"s{s}_mode"].tobytes() for s in SETUPS}
     assert len(set(signatures.values())) >= 4, "the setups look suspiciously alike"
+
+
+# --------------------------------------------------------------------------
+# What this file's test count is made of.
+# --------------------------------------------------------------------------
+
+
+def _collected_test_count(module):
+    """How many tests pytest collects from `module`, from its own marks.
+
+    There are no test classes here and no fixture-driven parametrisation, so
+    the product of the `parametrize` argument-list lengths is exact. Checked
+    against `pytest --collect-only` when it was written.
+    """
+    total = 0
+    for name, obj in vars(module).items():
+        if not name.startswith("test_") or not callable(obj):
+            continue
+        cases = 1
+        for mark in getattr(obj, "pytestmark", []):
+            if mark.name == "parametrize":
+                cases *= len(mark.args[1])
+        total += cases
+    return total
+
+
+def test_the_shape_only_parametrisations_are_most_of_the_count():
+    """The header's arithmetic, recomputed, so it cannot go stale.
+
+    `test_per_mode_tables_are_full_width` and
+    `test_per_component_tables_match_ncp` assert `.shape` and nothing else.
+    Between them they are the majority of this file. Saying so in the header is
+    only useful if the numbers are true, and numbers in prose are exactly what
+    this repository keeps finding to be wrong -- so they are derived here and
+    matched against the text.
+    """
+    shape_only = len(SETUPS) * (len(MODE_REAL + MODE_INT) + len(CP_REAL + CP_INT))
+    total = _collected_test_count(sys.modules[__name__])
+    assert shape_only == 140
+    assert f"{total} tests here" in __doc__, f"the header does not say {total}"
+    assert f"{shape_only} of them" in __doc__
+    assert f"{round(100 * shape_only / total)}%" in __doc__
+    assert shape_only < total

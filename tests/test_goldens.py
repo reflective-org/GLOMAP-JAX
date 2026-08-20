@@ -29,6 +29,7 @@ import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 GOLDENS = REPO / "tests" / "goldens"
+FORTRAN = REPO / "fortran"
 sys.path.insert(0, str(REPO / "validation"))
 import goldens_manifest as gm  # noqa: E402
 
@@ -194,28 +195,139 @@ def test_budgets_are_one_row_per_step_and_never_negative(case):
 
 @pytest.mark.parametrize("case", CASES)
 def test_budget_slot_zero_is_never_written(case):
-    """Every one of the ~684 writes in the Fortran is wrapped in
-    `IF (nmasxxx > 0)`, so slot 0 is a hole and not a null sink. A port that
-    clamps unset indices to 0 and scatters into it changes the semantics."""
+    """All 344 writes in the vendored tree are wrapped in `IF (nmasxxx > 0)`,
+    so slot 0 is a hole and not a null sink. A port that clamps unset indices
+    to 0 and scatters into it changes the semantics.
+
+    344, not the ~684 this said before: a write site spans two source lines, so
+    a line-oriented grep double-counts it. The number is machine-checked by
+    `tests/test_budget_indices.py::test_every_write_site_is_guarded_on_its_own_index`,
+    which is also where "guarded" is verified — this test only shows the column
+    stays zero in four committed runs."""
     data = load(case, "f64", "budgets")
     columns = list(data["columns"])
     assert (data["values"][:, columns.index("bud0")] == 0).all()
 
 
+# The thirteen call sites, counted in `ukca_aero_step.F90`: `ukca_calc_drydiam`
+# at :541, :561, :1146 and :1171; `ukca_volume_mode` at :564, :1149 and :1175;
+# `ukca_remode` at :545 and :1156; and `ukca_conden` (:925),
+# `ukca_calcnucrate` (:1030), `ukca_coagwithnucl` (:1099) and `ukca_ageing`
+# (:1129) once each. The first pair of drydiam/volume_mode/remode calls runs
+# before the `imts` loop and the rest inside it, which is how the two groups
+# are told apart below. `tests/test_state_dump.py` asserts the same thirteen
+# against a live instrumented run; this asserts them from the committed
+# archives, which is the half that runs without gfortran.
+CALLS_PER_SITE = {
+    "drydiam": 4,
+    "volume_mode": 3,
+    "remode": 2,
+    "conden": 1,
+    "calcnucrate": 1,
+    "coagwithnucl": 1,
+    "ageing": 1,
+}
+
+# `ukca_calcnucrate` writes a second record at the next `seq` carrying only
+# these four gas-phase fields (overlay 0005). It is the same call, so the gas
+# record must not be counted as a fourteenth site.
+GAS_FIELDS = ("h2so4", "delh2so4_nucl", "sec_org", "s_cond_s")
+
+AERO_STEP_CALLS = {
+    "drydiam": ("CALL ukca_calc_drydiam", (541, 561, 1146, 1171)),
+    "volume_mode": ("CALL ukca_volume_mode", (564, 1149, 1175)),
+    "remode": ("CALL ukca_remode", (545, 1156)),
+    "conden": ("CALL ukca_conden", (925,)),
+    "calcnucrate": ("CALL ukca_calcnucrate", (1030,)),
+    "coagwithnucl": ("CALL ukca_coagwithnucl", (1099,)),
+    "ageing": ("CALL ukca_ageing", (1129,)),
+}
+
+KEY_COLUMNS = ("step", "seq", "imts", "izts", "imode", "icp", "field")
+
+
 @pytest.mark.parametrize("case", CASES)
 def test_state_snapshots_cover_all_thirteen_call_sites(case):
+    """Thirteen, checked — the name used to be aspirational.
+
+    What this asserted before was that seven site *names* are present and that
+    `int(data["_rows"]) == len(data["value"])`, which is true by construction:
+    the capture writes `_rows = len(rows)`. Neither says anything about
+    thirteen. The archives distinguish far more than seven — 84 distinct
+    `(site, seq)` pairs per step, 94 for `bl_nmts3` — because `seq` counts
+    calls, not sites.
+
+    So the call sites are reconstructed: a call is one `(site, step, imts,
+    izts, seq)` group, and a call *site* is a routine plus whether it runs
+    inside the `imts` loop plus its rank among that routine's calls in one
+    iteration. That gives 13 in all four cases, with the same per-routine
+    breakdown as the Fortran source, and it stays 13 when `nmts` changes from
+    1 to 3 — which is the point of counting sites rather than calls.
+    """
     data = load(case, "f64", "state")
-    assert set(data["site_levels"]) == {
-        "drydiam",
-        "remode",
-        "volume_mode",
-        "conden",
-        "calcnucrate",
-        "coagwithnucl",
-        "ageing",
-    }
+    sites = list(data["site_levels"])
+    assert set(sites) == set(CALLS_PER_SITE)
     assert np.isfinite(data["value"]).all()
-    assert int(data["_rows"]) == len(data["value"])
+
+    fields = list(data["field_levels"])
+    gas = [fields.index(f) for f in GAS_FIELDS if f in fields]
+    aerosol_row = ~np.isin(data["field"], gas)
+    site, seq, step, imts, izts = (
+        data[k][aerosol_row] for k in ("site", "seq", "step", "imts", "izts")
+    )
+
+    calls = set(zip(site.tolist(), step.tolist(), imts.tolist(), izts.tolist(), seq.tolist()))
+    per_iteration = {}
+    for isite, istep, imt, izt, iseq in calls:
+        per_iteration.setdefault((isite, istep, imt, izt), []).append(iseq)
+
+    found = {}
+    for (isite, _step, imt, _izts), seqs in per_iteration.items():
+        for rank in range(len(seqs)):
+            found.setdefault(sites[isite], set()).add((imt > 0, rank))
+
+    assert {name: len(ranks) for name, ranks in found.items()} == CALLS_PER_SITE
+    assert sum(CALLS_PER_SITE.values()) == 13
+
+
+def test_the_thirteen_call_sites_are_where_the_comment_says():
+    """The source half of the count above, so "thirteen" is not folklore.
+
+    Reading `fortran/src/ukca/`, which is read-only and committed, needs no
+    toolchain — so this belongs in this file rather than behind the `fortran`
+    marker. Fails if a vendored update moves or adds a call, which is exactly
+    the change that would silently make the archives cover twelve or fourteen.
+    """
+    lines = (
+        (FORTRAN / "src" / "ukca" / "ukca_aero_step.F90").read_text(encoding="utf-8").splitlines()
+    )
+    for site, (needle, linenos) in AERO_STEP_CALLS.items():
+        found = [n for n, line in enumerate(lines, 1) if line.lstrip().startswith(needle)]
+        assert found == list(linenos), f"{site}: {needle} is now at {found}"
+        assert len(linenos) == CALLS_PER_SITE[site], site
+    assert sum(len(linenos) for _, linenos in AERO_STEP_CALLS.values()) == 13
+
+
+@pytest.mark.parametrize("case", CASES)
+def test_state_keys_are_unique(case):
+    """`seq` is load-bearing and this is what makes it so.
+
+    `calc_drydiam` and `volume_mode` each run twice per `imts`, so without
+    `seq` the key `(step, imts, izts, imode, icp, field)` is not unique: a
+    committed golden once carried 397 keys with two different values,
+    separable only by file row order. Comparing `_rows` against
+    `len(data["value"])` — which is what stood here — could not have caught
+    that, because the capture writes `_rows = len(rows)`.
+    """
+    data = load(case, "f64", "state")
+    rows = int(data["_rows"])
+    assert {len(data[c]) for c in (*KEY_COLUMNS, "site", "value")} == {rows}
+
+    key = np.stack([data[c].astype(np.int64) for c in KEY_COLUMNS], axis=1)
+    assert len(np.unique(key, axis=0)) == rows, (
+        f"{case}: {rows - len(np.unique(key, axis=0))} rows share a "
+        f"{KEY_COLUMNS} key, so the dump cannot be joined against the port"
+    )
 
 
 @pytest.mark.parametrize("case", CASES)
