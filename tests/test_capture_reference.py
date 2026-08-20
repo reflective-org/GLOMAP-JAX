@@ -100,8 +100,21 @@ def test_namelist_rewrite_silences_the_streams_not_being_captured(tmp_path):
 
 @pytest.fixture(scope="module")
 def smoke(tmp_path_factory):
-    if not (REPO / "fortran" / "bin-ref-f64" / "glomap_box").is_file():
-        pytest.skip("reference not built; run validation/build_reference.sh")
+    # Both variants, not just f64: this capture includes the f32 trajectory, so
+    # with only f64 built `cr.capture` raised SystemExit *inside* fixture setup.
+    # pytest then reported six copies of an internal `assert not
+    # self._finalizers` and swallowed the one line that said what was wrong
+    # ("run: ./validation/build_reference.sh f32"). A half-built reference is
+    # not built.
+    missing = [
+        variant
+        for variant in ("f32", "f64")
+        if not (REPO / "fortran" / f"bin-ref-{variant}" / "glomap_box").is_file()
+    ]
+    if missing:
+        pytest.skip(
+            f"reference not built ({', '.join(missing)}); run validation/build_reference.sh"
+        )
     out = tmp_path_factory.mktemp("cap")
     cr.main(["--case", "marine_bcoc", "--steps", "2", "--out", str(out)])
     return out
@@ -199,3 +212,51 @@ def test_a_missing_reference_build_fails_loudly(tmp_path):
     job = cr.Job("marine_bcoc", "trajectory", "f99", None)
     with pytest.raises(SystemExit, match=re.escape("build_reference.sh")):
         cr.capture(job, tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# `_namelist_sha256`. No `fortran` marker: this is text processing, and it has
+# to run in CI, where the consequence of getting it wrong is visible.
+# ---------------------------------------------------------------------------
+
+
+def _hash(case: str, key: str, target: str, steps: int | None = 2) -> str:
+    source = cr.discover_cases()[case]
+    return cr._namelist_sha256(cr._rewrite_namelist(source, key, Path(target), steps))
+
+
+def test_the_namelist_hash_identifies_the_namelist_not_the_run():
+    """`_rewrite_namelist` writes the output path into the namelist, and capture
+    runs in a `TemporaryDirectory()`, so hashing the text directly asked "was
+    this the same run" -- answer always no. Every one of the 20 box-binary
+    goldens then changed identity on every regeneration with every number
+    unmoved, `describe()` folded that into `content_sha256`, and `_explain_drift`
+    emitted "regenerated from a different namelist or variant" unconditionally.
+    """
+    source = cr.discover_cases()["marine_bcoc"]
+    a = cr._rewrite_namelist(source, "branch_file", Path("/tmp/aaaaaa/stream.csv"), 2)
+    b = cr._rewrite_namelist(source, "branch_file", Path("/tmp/bbbbbb/stream.csv"), 2)
+    assert a != b, "the two namelist texts must really differ, or this proves nothing"
+    assert cr._namelist_sha256(a) == cr._namelist_sha256(b)
+
+
+def test_a_real_namelist_change_still_moves_the_hash():
+    """The normalisation must not be so broad that it hashes nothing. Each of
+    these is a genuine difference in what the reference was asked to compute."""
+    base = _hash("marine_bcoc", "branch_file", "/tmp/x/stream.csv", steps=2)
+    assert _hash("marine_bcoc", "branch_file", "/tmp/x/stream.csv", steps=3) != base
+    assert _hash("boundary_layer", "branch_file", "/tmp/x/stream.csv", steps=2) != base
+    assert _hash("marine_bcoc", "state_file", "/tmp/x/stream.csv", steps=2) != base
+
+
+def test_the_normalisation_keeps_which_streams_are_silenced():
+    """The distinction between a key pointed at a file and a key silenced to ''
+    is a property of the capture, not of the scratch directory, so it must
+    survive normalisation -- otherwise the hash could not tell a branches
+    capture from one that wrote no branches at all."""
+    source = cr.discover_cases()["marine_bcoc"]
+    text = cr._canonical_namelist(cr._rewrite_namelist(source, "branch_file", Path("/t/s.csv"), 2))
+    assert "branch_file = '<capture>'" in text
+    assert "state_file = ''" in text
+    assert "budget_file = ''" in text
+    assert "/t/s.csv" not in text

@@ -40,6 +40,18 @@ on the patch text itself so it holds regardless of what the patch claims about
 itself. A removal means a science line was altered or deleted, which is a
 science change wearing instrumentation's clothes, and the build rejects it.
 
+That check reads unified-diff syntax, and `patch` reads whatever it is handed —
+it auto-detects unified, context and normal diffs. A phase C review demonstrated
+both of the other two changing `se_ins = 1.0` to `0.3` in
+`src/ukca/ukca_conden.F90` with the additive gate exiting 0: a context diff never
+emits a `+++ ` line, so the gate never arms, and a normal diff has no
+`---`/`+++ ` headers at all and marks removals with `<`. So **every overlay must
+be a unified diff**, validated structurally (`require_unified_diff`) before the
+additive gate parses it, and `patch -u` pins the interpretation so the two
+cannot disagree. Validating the hunk line counts is also what makes the additive
+gate exact: it never has to guess whether a `---` line is a file header or the
+removal of a line whose text begins with `--`.
+
 An overlay that fails to apply is a hard error, not a warning: a silently
 skipped overlay would produce a reference that looks right and is missing its
 instrumentation.
@@ -97,21 +109,43 @@ Each archive is one `.npz` named `<case>.<variant>.<mode>.npz`. The two wide
 streams store a float64 table plus its column names; the two long-format streams
 store integer columns with their string labels factorised into a codebook, and
 branch values as `int8`. Every archive carries `_case`, `_mode`, `_variant`,
-`_rows` and a SHA-256 of the exact namelist that produced it, so a stale golden
-is distinguishable from a regenerated one.
+`_rows` and a SHA-256 of the namelist that produced it, so a stale golden is
+distinguishable from a regenerated one. That hash is taken over the namelist
+with the capture's scratch paths normalised out — the capture writes each stream
+into a `TemporaryDirectory()`, and hashing that path identified the *run*, so
+every golden's provenance moved on every regeneration and the drift gate's
+"regenerated from a different namelist" message fired unconditionally.
 
-**The full golden set is 0.80 MB** across all four cases and all four modes —
-roughly 90× smaller than the CSV the reference emits, mostly because the state
-dump's 318k rows per case compress to ~0.15 MB once the labels are codes. Git
-LFS is not needed at this size (task 18 records the decision).
+**The box-model golden set is 938,271 bytes**, i.e. 0.94 MB — twenty archives,
+the sixteen `f64` case × mode streams plus the four `f32` trajectories. The CSV
+those sixteen `f64` streams come from totals 81.3 MB, so the archives are
+roughly 89× smaller, mostly because the state dump's **320,832** rows per case
+(**366,912** for `bl_nmts3`, the one case with `nmts > 1`) compress to
+0.16–0.28 MB once the labels are codes. Git LFS is not needed at this size
+(task 18 records the decision).
+
+Those figures are re-derived from the committed archives by
+`tests/test_goldens_manifest.py::test_the_sizes_this_page_states_are_the_sizes_on_disk`,
+so the paragraph goes red rather than stale — it has drifted twice already, once
+when overlay `0005` regrew the state dumps by making their records uniquely
+keyed. The 81.3 MB CSV total is the one number not pinned: re-deriving it needs
+a reference build, which CI does not have.
 
 ## The drift / orphan gate
 
 ```sh
-python validation/goldens_manifest.py --check    # exit 1 on any problem
+python validation/goldens_manifest.py            # exit 1 on any problem
+python validation/goldens_manifest.py --check    # the same, spelled out
 python validation/goldens_manifest.py --write    # re-bless, deliberately
-make goldens                                     # build + capture + write
+make goldens                                     # build + capture + check
+make goldens-bless                               # re-bless, deliberately
 ```
+
+`make goldens` regenerates every fixture and then **reports** what moved,
+exiting non-zero if anything did. It does not re-bless: blessing is
+`make goldens-bless`, a separate command, because a target that regenerated and
+re-blessed in one step would make the drift gate silent exactly when it has
+something to say.
 
 `tests/goldens/MANIFEST.json` records every array's **name, dtype, shape and
 content hash**, the provenance keys the capture tool embeds, and the toolchain
@@ -132,10 +166,16 @@ Drift messages name *what* moved (`a.npz[values] values changed`,
 regenerated from a different namelist), because "the hash changed" is not
 something anyone can act on.
 
-**Array contents are hashed, not the `.npz` file.** `np.savez_compressed` writes
-a zip and zip entries carry timestamps, so the same data written twice gives two
-different file hashes. A file-level hash would fail on every regeneration and be
-loosened away within a week.
+**Array contents are hashed, not the `.npz` file.** An earlier version of this
+page said a file hash was unusable because zip entries carry timestamps. That is
+not true of numpy: `np.savez_compressed` stamps every member with the DOS epoch
+`(1980, 1, 1)`, so the same data written twice gives byte-identical files
+(measured, numpy 2.5). The design is still right, for two other reasons. A file
+hash says only *that* something moved, where the manifest's job is to say
+*which* array moved. And it hashes the container rather than the data —
+compression level, member order and zip metadata belong to numpy and zlib, so a
+numpy upgrade could fail the gate on data that had not moved, and a gate that
+fails on non-findings gets loosened.
 
 Capture does **not** update the manifest. Auto-blessing a capture would make the
 gate silent the one time it matters, so `--write` is always an explicit act.
