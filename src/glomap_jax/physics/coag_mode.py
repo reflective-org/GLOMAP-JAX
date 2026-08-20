@@ -71,15 +71,19 @@ package; add one for the Fortran's. Over the full table, the 64
 
 and restricted to the pairs that actually write `mtran` (`source_pairs`), the
 box model's reachable configurations collide like this
-(`destination_census`)::
+(`destination_census`) -- `l_dust_mp_ageing` is a `box_aerosol` namelist
+variable (`glomap_box_config_mod.F90:147`, passed through at `:336`) and
+`validate_config` does not constrain it, so the last row is a configuration a
+user can ask for, not a UM-only one::
 
     setup 1/3/5  (4 soluble modes)          6 pairs   -> {1: 1, 2: 2, 3: 3}
     setup 2/4/8  (+ Aitken insoluble)       9 pairs   -> {1: 2, 2: 3, 3: 4}
     setup 8, l_dust_mp_ageing              15 pairs   -> {1: 2, 2: 5, 3: 8}
     setup 6      (dust only, no soluble)    0 pairs   -> {}
 
-So up to eight `mtran` terms are summed into `mtrantoi[:, 3, icp]` — four in
-any configuration the box model can actually run — and float addition is not
+So up to eight `mtran` terms are summed into `mtrantoi[:, 3, icp]` — four at
+the shipped defaults, eight once dust ageing is switched on — and float
+addition is not
 associative: the *order* of those eight adds is part of the
 answer, not an implementation detail. `tests/test_coag_mode.py` adds eight
 representative magnitudes in Fortran order and in reverse and gets two
@@ -105,7 +109,24 @@ get wrong:
    puts the order back under our control, at no cost, because the unrolled form
    is what XLA would have to produce anyway.
 
-3. **`jnp.sum` over the `jmode` axis is not a shortcut.** A pairwise reduction
+3. **The scatter is gated on the *source* mode's components, and the three
+   `mtran` blocks are not gated alike.** `ukca_coagwithnucl.F90:527-528` reads
+   `DO icp=1,ncp / IF (component(imode,icp))`, so a term only leaves `mtran`
+   if the mode it came *from* carries that component. The three blocks that
+   write `mtran` disagree about their own guard: block 1 (`:325`) tests
+   `component(jmode,icp)`, block 3 (`:488`) tests `component(imode,icp)`, and
+   block 2 (`:365-372`) tests **nothing** — so it writes entries for
+   components `imode` does not carry, which the scatter then silently drops.
+
+   A port that emits one add per pair for every `icp` — which is what
+   `accumulation_order` invites, since it returns pairs and says nothing about
+   components — therefore adds terms the Fortran never adds. Whether they are
+   nonzero turns on `mdold(:, icp, imode)` being exactly zero for absent
+   components, which is likely and is asserted nowhere. This module owns the
+   index bookkeeping, so the guard belongs here rather than in the caller's
+   head.
+
+4. **`jnp.sum` over the `jmode` axis is not a shortcut.** A pairwise reduction
    re-associates; the Fortran runs a sequential accumulation. Same trap as
    `rhommav` in `physics/modes.py`, and the same fix: write the loop.
 

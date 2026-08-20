@@ -399,10 +399,18 @@ def test_destinations_collide_so_the_scatter_must_accumulate():
         for d in (False, True)
     )
     assert worst == 8
-    reachable_by_the_box_model = max(
-        max(destination_census(modes.build(s)).values(), default=0) for s in SETUPS
-    )
-    assert reachable_by_the_box_model == 4
+
+    # Not "reachable by the box model" -- that is what this used to say, and it
+    # was wrong. `l_dust_mp_ageing` is a `box_aerosol` namelist variable
+    # (glomap_box_config_mod.F90:147, passed through at :336) that
+    # `validate_config` does not constrain, so eight is reachable from a
+    # namelist. Four is the worst case at the shipped *defaults*, which is a
+    # much weaker statement and must not be written as the stronger one: a port
+    # that unrolled four adds into destination 3 on the strength of it would
+    # drop four terms, and by this module's own associativity argument that is
+    # a different number rather than a differently-spelled one.
+    assert max(max(destination_census(modes.build(s)).values(), default=0) for s in SETUPS) == 4
+    assert max(destination_census(modes.build(8, l_dust_mp_ageing=True)).values()) == 8
 
 
 def test_accumulation_order_is_the_fortran_loop_order():

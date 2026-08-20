@@ -81,7 +81,7 @@ with it is a bug the array bounds will not catch, because -1 is legal in
 numpy — so presence is tested, never assumed."""
 
 NCHEMGMAX = GAS_LITERALS["nchemgmax"]
-"""`ukca_setup_indices.F90:608`, a PARAMETER. `mm_gas`, `dimen`,
+"""`ukca_setup_indices.F90:604`, a PARAMETER. `mm_gas`, `dimen`,
 `condensable_choice` and `condensable` are all `dimension(nchemgmax)` and stay
 full width: entries past `nadvg` are dummies the Fortran still allocates, and a
 port that trimmed them would change every index."""
@@ -90,11 +90,15 @@ _SETUP_ROUTINE = GAS_LITERALS["setup_routine"]
 _GROUPS = GAS_LITERALS["groups"]
 _ROUTINES = GAS_LITERALS["routines"]
 
-# The gas scalars any part of the vendored tree actually reads, from the
-# `USE ukca_setup_indices, ONLY:` lists in ukca_aero_step, ukca_conden,
-# ukca_calcnucrate, ukca_wetox, ukca_fine_no3_mod, ukca_coarse_no3_mod and
+# The gas scalars any part of the vendored tree actually reads, taken from the
+# `USE ukca_setup_indices, ONLY:` closure over ukca_aero_step, ukca_conden,
+# ukca_coagwithnucl, ukca_wetox, ukca_fine_no3_mod, ukca_coarse_no3_mod and
 # glomap_box_*. Everything else in the table is carried for fidelity and is
 # reachable through `s0` / `st` / `budget` / `reaction`.
+#
+# Not ukca_calcnucrate: it does not `USE ukca_setup_indices` at all, and naming
+# it here was a guess from what the routine sounds like it needs rather than
+# from its import list.
 _LIVE_S0 = ("mh2so4", "msec_org", "msec_orgi", "msotwo", "mh2o2", "mh2o2f", "mhno3", "mnh3")
 
 
@@ -211,7 +215,9 @@ def build(setup: int) -> GasIndices:
     lit = _ROUTINES[routine]
     raw: dict[str, int] = dict(lit["scalars"])
 
-    # Derived, recomputed rather than copied -- `ukca_setup_indices.F90:707-708`
+    # Derived, recomputed rather than copied. Every setup routine writes the
+    # same two lines -- `nadvg=2+nchemg` / `ntrag=nadvg+noffox`, e.g.
+    # `ukca_setup_indices.F90:647-648` in nochem and `:2956-2957` in sv1
     # and the same two lines in each of the other three routines.
     nchemg = raw["nchemg"]
     noffox = raw["noffox"]
