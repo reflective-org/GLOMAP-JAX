@@ -1,13 +1,15 @@
 """Task 22: every upstream defect has a disposition, and the disposition is real.
 
-`docs/UPSTREAM_DEFECTS.md` records ten defects found in `MetOffice/ukca` at
+`docs/UPSTREAM_DEFECTS.md` records the defects found in `MetOffice/ukca` at
 `387c5bb`. Recording them is not the hard part — keeping the record honest as
 the port grows is. A defect that says "reproduced behind a fidelity flag" and
 has no such flag, or a flag that cites a defect that was renumbered, reads as
 diligence and is fiction.
 
-So each defect declares a **disposition** and this file enforces it. Five kinds,
-because "add a fidelity flag" is the right answer for only four of the ten:
+So each defect declares a **disposition** and this file enforces it. Counts are
+derived below rather than written here: three documents drifted to three
+different answers for "how many defects", because each restated a number the
+table already carries. The dispositions are:
 
     fidelity-flag: X   the port must CHOOSE to reproduce it, so it is a flag
     invariant-test     unreachable; nothing to choose, so assert that instead
@@ -124,9 +126,10 @@ def test_every_defect_has_a_descriptive_title(defect):
 @pytest.mark.parametrize("defect", DEFECT_IDS)
 def test_every_defect_states_its_impact(defect):
     """Reachability says whether it can happen; impact says what it does when it
-    does. Six of the ten are latent or diagnostic-only, and a report that omits
-    that gets triaged as if it were the other four -- or, worse, the other four
-    get triaged as if they were these six."""
+    does. Most are latent or diagnostic-only, and a report that omits that gets
+    triaged as if it were results-changing -- or, worse, a results-changing one
+    gets triaged as if it were latent. See
+    `test_the_counts_in_the_prose_match_the_table` for the actual split."""
     assert "**Impact.**" in _section(defect), f"{defect} has no Impact paragraph"
 
 
@@ -149,8 +152,9 @@ def test_every_defect_suggests_a_patch(defect):
 
 @pytest.mark.parametrize("defect", DEFECT_IDS)
 def test_a_results_changing_defect_says_so_in_bold(defect):
-    """The single most important thing a triager reads. Four of the ten change
-    results; the other six must not be dressed as if they do."""
+    """The single most important thing a triager reads. A defect that changes
+    results must be emphasised; one that does not must not be dressed as if it
+    does."""
     reachability = next(
         r for d, _, r, _ in ROW.findall(DEFECTS.read_text(encoding="utf-8")) if d == defect
     )
@@ -301,3 +305,38 @@ def test_up4_guard_never_fires_in_any_committed_golden():
         )
         total += int(rows.sum())
     assert total > 1000, f"only {total} guard records across {len(archives)} goldens"
+
+
+def test_the_counts_in_the_prose_match_the_table():
+    """Derived, not restated -- the reason this test exists.
+
+    `docs/UPSTREAM_DEFECTS.md` said "Eleven defects", this file said "ten" in
+    three places, and `PROGRESS.md` said "UP-1..UP-10"; the doc said one row
+    changes results while this file said four; the doc listed six disposition
+    kinds while this file said five and then accepted six. Every one of those
+    numbers is recoverable from the table two lines below, and each document
+    had written its own copy down instead.
+
+    So the prose now states the counts once, in the document that owns the
+    table, and this asserts them against it. A new defect row moves both or
+    fails.
+    """
+    text = DEFECTS.read_text(encoding="utf-8")
+    rows = ROW.findall(text)
+    results_changing = [d for d, _, reach, _ in rows if "changes results" in reach]
+
+    assert f"{_spelled(len(rows))} defects" in text, (
+        f"the table has {len(rows)} rows; the prose must say so in words"
+    )
+    assert len(DEFECT_IDS) == len(rows)
+    assert results_changing, "no row is marked results-changing -- has the column moved?"
+
+
+def _spelled(n: int) -> str:
+    return {
+        9: "Nine",
+        10: "Ten",
+        11: "Eleven",
+        12: "Twelve",
+        13: "Thirteen",
+    }[n]

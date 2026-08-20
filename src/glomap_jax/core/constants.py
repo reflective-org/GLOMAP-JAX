@@ -4,7 +4,7 @@
 deliberate.** UKCA carries `avogadro = 6.022e23` and
 `boltzmann = 1.3804e-23`; the 2019 SI definitions are `6.02214076e23` and
 `1.380649e-23`. Substituting the better values changes every concentration
-conversion in the model by ~4e-5 relative — four orders of magnitude above
+conversion in the model by 2.3e-5 relative -- eight orders of magnitude above
 `RTOL_ALGEBRAIC` — and no golden would match.
 
 That is the same trap as `jnp.cbrt` (see `core/numerics`): the more accurate

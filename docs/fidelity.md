@@ -1,6 +1,6 @@
 # Fidelity flags
 
-Every flag in `FidelityConfig` (`src/glomap_jax/config.py`) has a default that
+Every flag in `FidelityConfig` (`src/glomap_jax/config/fidelity.py`) has a default that
 **reproduces the Fortran**, including where the Fortran is wrong. That is not
 deference; it is the only way a trajectory comparison against the reference
 means anything.
@@ -213,7 +213,8 @@ y(i) = x(i) ** (1.0 / 3.0)
 That is a power, not a cube root, and the two are not the same computation.
 Measured over 1,865 swept points: `x ** (1.0/3.0)` in JAX is **bit-identical**
 to the Fortran; `jnp.cbrt` differs on **1,756** of them by up to **1.3e-14**,
-which is a hundred times `RTOL_ALGEBRAIC`.
+which is **0.13 times** `RTOL_ALGEBRAIC`, not a hundred times it as this said
+for three reviews. The magnitude was never the argument; the branch flip is.
 
 The reason that matters is not the size. `cubrt_v` produces `drydp`, and
 `drydp` is compared directly against `dp_thresh1` (`ukca_remode.F90:234` — merge
@@ -249,7 +250,7 @@ on any mode carrying sea salt. Applying it after the masses would leave them
 built from the uncorrected density, silently. Captured at both settings as the
 `nacl_off` golden.
 
-It also reaches `no_ions`, but not independently: `:168` tests
+It also reaches `no_ions`, but not independently: `:474-475` tests
 `l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density`, so with
 hygroscopicities off this flag has no effect on that table at all.
 

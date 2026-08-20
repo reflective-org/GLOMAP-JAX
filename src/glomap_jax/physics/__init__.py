@@ -14,5 +14,8 @@ The order is forced by the Fortran, not by preference:
     ageing       -> LAST among processes: consumes ageterm1 AND ageterm2
     remode       -> needs only drydp and erf
 
-Nothing here yet. Phase C (mode tables) lands first; see PROGRESS.md.
+Phase C is complete: `modes.py` (the mode tables), `gas_indices.py`,
+`budget_indices.py` and `coag_mode.py`, each with a generated `_*_literals`
+module beside it. The process routines land in phases D onward; see
+PROGRESS.md.
 """

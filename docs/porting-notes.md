@@ -157,7 +157,8 @@ Three rules follow, and all three are asserted in
 
 **Write the cube root as `x ** (1.0/3.0)`.** `cubrt_v` is literally that
 expression; it is not a cube-root function. `np.cbrt` disagrees on 94% of the
-grid by up to 1.3e-14 — a hundred times `RTOL_ALGEBRAIC`. This is the one that
+grid by up to 1.3e-14, which is 0.13 times `RTOL_ALGEBRAIC` and not the
+hundred times claimed here for three reviews. This is the one that
 carries the branch risk the plan mis-attributed to `erf`: `cubrt_v` produces
 `drydp`, and `drydp` is compared directly against `dp_thresh1` (merge or not)
 and against `ddplim0·0.1` (rewrite `md`/`mdt` or not). Both are step changes,
@@ -228,7 +229,7 @@ built from the uncorrected density, silently, and by 35% on any mode carrying
 sea salt.
 
 **A nested `.AND.` is not two independent knobs.**
-`ukca_mode_setup.F90:168` tests
+`ukca_mode_setup.F90:474-475` tests
 `l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density` before assigning
 `no_ions`, so NaCl density only reaches that table when hygroscopicities is
 also on. Reading them as independent selects the default branch and gets all
@@ -263,9 +264,13 @@ are gated on `topmode > mode_ait_insol`, which is false by default.
 comments say "allowed in nuc_sol". `component` is which are actually *present*
 for this setup: the three-way intersection of allowed, chosen, and mode-is-on.
 
-Assuming they are the same passes on setup 1 and fails on five of the other
-six. The invariant is containment, and the test also asserts the two genuinely
-differ, so the containment check cannot quietly go vacuous.
+Assuming they are the same fails on **all seven** supported setups — 18
+differing cells on setup 1, 22 on setup 6. `component_mode` is in fact the same
+table in every setup, being the full permission list; `component` is the
+intersection and never equals it. (This said "passes on setup 1 and fails on
+five of the other six", which is wrong in both halves.) The invariant is
+containment, and the test also asserts the two genuinely differ, so the
+containment check cannot quietly go vacuous.
 
 ## `i_tune_bc` has no `CASE DEFAULT`
 

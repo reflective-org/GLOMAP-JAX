@@ -1,8 +1,8 @@
 """Constants are extracted from the Fortran, never retyped.
 
 `mam4-jax`'s convention, and the reason for it is arithmetic: UKCA carries
-`avogadro = 6.022e23` where CODATA says `6.02214076e23`. That is 3.6e-5
-relative — four orders of magnitude above `RTOL_ALGEBRAIC`. A single digit
+`avogadro = 6.022e23` where CODATA says `6.02214076e23`. That is 2.3e-5
+relative — eight orders of magnitude above `RTOL_ALGEBRAIC`. A single digit
 typed from memory instead of from the source silently invalidates every golden
 comparison downstream of a concentration conversion, and the failure appears in
 whichever routine happens to use it first.

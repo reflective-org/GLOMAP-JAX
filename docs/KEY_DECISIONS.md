@@ -115,10 +115,17 @@ Measured, at the namelists' own 48 steps:
 | budgets | 0.13 MB | |
 | state | 15.90 MB | |
 | branches | 3.82 MB | |
-| **total** | **19.89 MB** for `marine_bcoc` | **0.78 MB** for all four cases and all four modes |
+| **total** | **19.89 MB** for `marine_bcoc` | **0.914 MB** for all four cases and all four modes |
 
-A factor of about 99 measured across all four cases (76.8 MB of CSV against
-0.78 MB of `.npz`); the single-case row above is `marine_bcoc`, the largest.
+A factor of about 84 measured across all four cases (76.8 MB of CSV against
+0.914 MB of `.npz`); the single-case row above is `marine_bcoc`, the largest.
+
+Was 0.78 MB and a factor of 99 when this was written, and correct then.
+Commit `52db7d3` gave the state-dump records unique keys, which regrew them by
+~18%, and three separate documents kept quoting the old figure. Re-measure
+before quoting this rather than copying it forward -- and see
+`tests/test_goldens_manifest.py`, which asserts the size budgets so the
+decision is re-opened by a failing test rather than by someone noticing.
 Three things do the work, and all three are properties of
 this data rather than of compression in general: the long-format dumps repeat a
 small vocabulary of `site`, `field` and `tag` labels over hundreds of thousands

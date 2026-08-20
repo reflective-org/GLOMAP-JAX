@@ -70,7 +70,7 @@ is computed where it is used, because a derived value in a constants table is a
 second source of truth that can drift from the first.
 
 Both are machine-checked against the vendored Fortran — `constants.py` by
-re-parsing, `physics/_mode_literals.py` by re-extraction. Several hundred
+re-parsing, `physics/_mode_literals.py` by re-extraction. 1,351
 numbers typed by hand is how a wrong model comes to look plausible.
 
 ## What "ported" means here

@@ -24,7 +24,7 @@ Two of those need saying out loud, because both look like improvements.
 
 ``jnp.cbrt`` is a better cube root than ``x ** (1.0/3.0)``. It is also not what
 ``ukca_um_legacy_mod``'s ``cubrt_v`` computes, and the difference reaches
-1.3e-14 — a hundred times ``RTOL_ALGEBRAIC``. Its output is ``drydp``, which is
+1.3e-14, which is *below* ``RTOL_ALGEBRAIC``. Its output is ``drydp``, which is
 compared against ``dp_thresh1`` (merge or not) and ``ddplim0*0.1`` (rewrite
 ``md``/``mdt`` or not). Both are step changes, so a parcel within 1.3e-14 of
 either threshold goes one way in the reference and the other in the port. They

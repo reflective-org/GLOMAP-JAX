@@ -34,6 +34,7 @@ import pytest
 
 from conftest import (
     CROSS_PLATFORM_ULP_BY_PRIMITIVE,
+    RTOL_ALGEBRAIC,
     RTOL_TRANSCENDENTAL,
     assert_matches_reference,
 )
@@ -157,7 +158,7 @@ def test_cbrt_must_be_written_as_x_to_the_one_third(sweep):
     function, and the two are not the same computation.
 
     `x ** (1.0/3.0)` in JAX reproduces the Fortran bit for bit. `np.cbrt`
-    disagrees on 1756 of 1865 points, by up to 1.3e-14 — a hundred times
+    disagrees on 1756 of 1865 points, by up to 1.3e-14 — which is *below*
     `RTOL_ALGEBRAIC`. Since `cubrt_v` is what produces `drydp`, and `drydp`
     feeds `ukca_remode`'s merge threshold and `ukca_calc_drydiam`'s undersize
     reset, that is a branch-flipping difference and not a cosmetic one."""
@@ -168,6 +169,15 @@ def test_cbrt_must_be_written_as_x_to_the_one_third(sweep):
     assert not np.array_equal(np.cbrt(x), sweep["cubrt_y"]), (
         "np.cbrt now agrees with x**(1/3); re-measure before relaxing the rule"
     )
+    # Asserted rather than asserted-in-prose. The docstring above claimed for
+    # three reviews that the gap was "a hundred times RTOL_ALGEBRAIC" when it
+    # is 0.13 times it -- a wrong magnitude that made the rule look better
+    # founded than it is. The rule stands on the branch flip, so the honest
+    # statement is that the gap is *below* the algebraic tolerance and matters
+    # anyway. If that stops being true, this fails and the sentence gets
+    # rewritten from a measurement.
+    gap = np.max(np.abs((np.cbrt(x) - sweep["cubrt_y"]) / sweep["cubrt_y"]))
+    assert gap < RTOL_ALGEBRAIC, f"cbrt gap {gap:.2e} is no longer below RTOL_ALGEBRAIC"
 
 
 def test_cbrt_and_the_power_form_disagree_about_negative_inputs(sweep):

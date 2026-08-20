@@ -9,11 +9,16 @@ result that looks plausible and is wrong.
 `src/glomap_jax/__init__.py`. Do not add redundant config calls, and never
 disable it.
 
-This is a correctness requirement, not accuracy tuning. `ukca_solvecoagnucl_v`
-selects among five closed-form solutions by comparing a discriminant against
-`eps_d = 1e-40`, and mode `num_eps` values reach `1e-20`. In float32 both
-underflow to zero and **a different branch runs** — a different answer, not a
-noisier one.
+This is a correctness requirement, not accuracy tuning — but **not** for the
+underflow reason this file gave for three reviews running. `1e-20` is a normal
+float32 number, `1e-40` is subnormal but non-zero, and `ref-f32` and `ref-f64`
+produce **identical** form-code histograms in the branch dump. See ADR-001; do
+not reintroduce the underflow argument.
+
+The measured reasons: the f32 reference is a *different trajectory*, not a
+noisier one — for `marine_bcoc` the column-scaled f32-vs-f64 gap is **0.80**
+(issue #14) — and even away from that the floor is **3.7e-4**, four orders
+above any tolerance worth gating on.
 
 float32 is permitted only as an explicitly labelled benchmark mode, never as a
 validated trajectory.
@@ -48,7 +53,10 @@ out = jnp.where(cond, num / safe_den, 0.0)
 ```
 
 A single `where` around a division still evaluates the unsafe branch and gives
-NaN cotangents under reverse-mode AD. `test_grad_finite` guards this.
+NaN cotangents under reverse-mode AD.
+`test_numerics.py::test_safe_divide_masks_without_poisoning_the_gradient`
+guards this. (It was cited here as `test_grad_finite`, which has never
+existed.)
 
 **Mask before reducing, never multiply.** Use `jnp.where(mask, term, 0.0)` ahead
 of a sum, not `mask * term`: several GLOMAP quantities are evaluated over the
@@ -62,8 +70,12 @@ permanently — it is the debugger, because it can raise real exceptions.
 loop-carried: `ukca_remode` over modes, `ukca_ageing` over modes (7→4 and 8→4
 collide) and over `jv`, `ukca_coagwithnucl`'s `icp` loop, and
 `ukca_water_content_v`'s 12 ion pairs. "Compute all deltas, then apply" changes
-the answer. Each has a test asserting the broadcast version *differs*, so the
-scan cannot be silently regressed.
+the answer.
+
+None of the five is ported yet, so none has such a test. **Each must get one
+asserting the broadcast version *differs*** — written as part of the port, not
+after it, since a scan that was never wrong is a scan nobody can show is
+needed. This paragraph previously stated that guarantee in the present tense.
 
 ## Validation
 
@@ -106,12 +118,12 @@ src/glomap_jax/
   drivers/    eager + scan timestepping, which must agree to RTOL_JIT_VS_EAGER
   utils/      helpers with no physics in them
 fortran/      vendored UKCA, READ-ONLY. src/ukca/ is Crown Copyright.
-inputs/       namelists this repo added; the shipped seven stay in fortran/
+inputs/       namelists this repo added; the shipped three stay in fortran/
 outputs/      run scratch, gitignored. NOTHING here is a golden.
 tests/        including goldens/ + MANIFEST.json — the committed reference
 validation/   the harness: build scripts, overlays, f2py binding, capture
 docs/         harness.md is the map; porting-notes.md has every measurement
-benchmarks/   throughput, orders 2-3
+benchmarks/   throughput, orders 2-3 (not created yet)
 figures/      generated plots, gitignored by default
 ```
 
@@ -126,7 +138,7 @@ Fortran and compares**. Do not type a constant from memory into a physics
 module; import it.
 
 The reason is arithmetic, not tidiness. UKCA carries `avogadro = 6.022e23`
-where CODATA says `6.02214076e23` — 3.6e-5 relative, four orders of magnitude
+where CODATA says `6.02214076e23` — 2.3e-5 relative, eight orders of magnitude
 above `RTOL_ALGEBRAIC`. "Correcting" it invalidates every golden downstream of
 a concentration conversion, and the failure surfaces in whichever routine
 happens to use it first.

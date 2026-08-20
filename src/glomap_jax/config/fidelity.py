@@ -6,9 +6,15 @@ arguments: every flag becomes a compile-time Python branch with no runtime cost.
 The fidelity registry is the important part. This is a *port*, so where the
 Fortran does something arguably wrong, the default reproduces the Fortran. That
 is not deference — it is the only way a trajectory comparison means anything.
-Each flag carries a written rationale in ``docs/fidelity.md`` and is tested at
-both settings, and ``tests/test_fidelity_registry.py`` fails on any flag that
-lacks either.
+Each flag carries a written rationale in ``docs/fidelity.md``, and
+``tests/test_fidelity_registry.py`` fails on any flag that lacks one, whose
+default disagrees with its hand-written table, or that no module under ``src/``
+reads.
+
+It does **not** check that a flag is exercised at both settings, and
+**both-settings tests do not exist yet** -- ``docs/fidelity.md`` says so in
+bold. This docstring claimed the opposite, which is worse than saying nothing:
+a reader trusts the registry to have caught what it never looked at.
 
 "Obviously a bug, so I fixed it" is how a port stops being a port. The clearest
 case below is ``ageing_totage_rescale_noop``, where the naive fix would lose
@@ -33,9 +39,13 @@ class FidelityConfig:
     """
 
     # UP-1. ukca_solvecoagnucl_v.F90:259 solves dN/dt = A*N^2 as
-    # 1/(1/N - 3*A*dt); the exact integral has no factor 3. Reachable EVERY
-    # substep for coarse and super-coarse insoluble modes, where inter-modal
-    # coagulation is skipped so B = C = 0 and the discriminant is exactly zero.
+    # 1/(1/N - 3*A*dt); the exact integral has no factor 3. Measured in the
+    # branch dump: fires on EVERY substep of every shipped case, for the top
+    # *soluble* mode -- mode_cor_sol has no larger soluble mode to coagulate
+    # with and no nucleation source, so B = C = 0 and the discriminant is
+    # exactly zero. The insoluble-mode argument this comment used to give is
+    # the pre-measurement one and is the weaker case: mode 7 is active only in
+    # setups 6 and 8, and mode 8 in none the box model supports.
     # Number decays three times too fast. Correcting it by default would break
     # every trajectory comparison.
     coag_intra_factor3: bool = True
@@ -72,9 +82,10 @@ class FidelityConfig:
     # own threshold is 1e-14, so condensation is suppressed by a factor of 1e6
     # too strict. :372 and :382 are no-ops because the entries happen to be
     # equal, and :387 is unreachable -- mode_sup_insol is active only in setups
-    # 12 and 13, neither of which the box model implements. Changes results on
-    # i_mode_setup=8, which has mode_acc_insol but NOT mode_sup_insol.
-    # LATENT, not live: :377 is gated by topmode > mode_ait_insol, and topmode
+    # 12 and 13, neither of which the box model implements.
+    # LATENT, not live -- this was called results-changing on setup 8 twice
+    # before it was measured, and that claim is retracted, not qualified:
+    # :377 is gated by topmode > mode_ait_insol, and topmode
     # is 5 unless l_dust_mp_ageing is set. Force it on with setup 8 and the mask
     # is still false -- init_state puts nd(mode_acc_insol) at exactly 1e-14 and
     # the test is strictly greater. No both-settings test is possible yet.
@@ -82,8 +93,10 @@ class FidelityConfig:
 
     # Not a defect: ukca_calc_drydiam.F90:245-262 silently rewrites md/mdt for
     # modes 1-3 (nuc/ait/acc soluble only, NOT all eight) whose diameter falls
-    # below ddplim0*0.1. Ungated and applied four times per nmts step, making it
-    # the most frequent state mutation in the model.
+    # below ddplim0*0.1. Ungated and applied twice per nmts step -- four times
+    # per ukca_aero_step call, five per chemistry step at nmts=1 counting the
+    # driver's update_size, and 2 + 2*nmts in general -- making it the most
+    # frequent state mutation in the model.
     drydiam_undersize_reset: bool = True
 
     # Upstream switch. Fixes a factor-ten typo in the H+/NO3- coefficient AND
@@ -124,7 +137,7 @@ class FidelityConfig:
     # reference here even though False is what the literal says.
     #
     # It also reaches no_ions, but only when l_fix_ukca_hygroscopicities is
-    # also on: ukca_mode_setup.F90:168 tests both, so this is not an
+    # also on: ukca_mode_setup.F90:474-475 tests both, so this is not an
     # independent knob for that table.
     l_fix_nacl_density: bool = True
 

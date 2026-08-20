@@ -43,7 +43,7 @@ Fixed in `b1d8f54`:
 * **`ibln`/`icondiam`/`imerge`/`ifuchs`/`idcmfp` were unvalidated** despite
   `ModelConfig` citing the very ereport that covers `ibln`.
 
-## Phase B — reference harness: **18/18 tasks done**, pending the phase review
+## Phase B — reference harness: **complete (18/18)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -140,9 +140,10 @@ asserted over the committed branch-dump goldens.
 that is easy to leave implicit — what each one cannot.
 
 **Fixture size (task 16, and most of task 18's answer).** The complete golden
-set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.80 MB** as
+set — 4 cases x 4 modes, at the namelists' own 48 steps — is **0.914 MB** as
 compressed `.npz`, against roughly 70 MB of CSV from the reference. The state
-dump is the bulk of it at 318k rows per case, and compresses to ~0.15 MB once
+dump is the bulk of it at 321k rows per case (367k for `bl_nmts3`), and
+compresses to 0.16-0.28 MB once
 its `site`/`field` labels are integer codes rather than repeated strings. Git
 LFS is not warranted — recorded as **ADR-007**, with the per-file (5 MB) and
 whole-set (25 MB) budgets asserted in `tests/test_goldens_manifest.py` so the
@@ -161,7 +162,9 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 * **20b** an `ereport` shim, because a fatal `ereport` does `STOP 1` in-process
   and would kill the pytest interpreter.
 
-All 18 tasks committed. Remaining before phase B closes: the adversarial review of the phase diff against the Fortran, with findings filed as issues.
+All 18 tasks committed, and the adversarial review of the phase diff against
+the Fortran is done — findings applied in `b53b871`…`2f8c1d4`, the rest filed
+as issues #6–#11 and #16–#18.
 
 ## Phase C — mode tables and indices: **complete (10/10)**
 
@@ -169,11 +172,11 @@ All 18 tasks committed. Remaining before phase B closes: the adversarial review 
 |---|---|---|
 | 24 | Capture mode tables, all 7 setups | `6599091` |
 | 25 | Port `modes.py` for setup 1 | `6442f24` |
-| 26 | Setups 2, 3 | this commit |
-| 27 | Setups 4, 5 | this commit |
-| 28 | Setup 6 (dust-only) | this commit |
+| 26 | Setups 2, 3 | `4bdd755` |
+| 27 | Setups 4, 5 | `4bdd755` |
+| 28 | Setup 6 (dust-only) | `4bdd755` |
 | 29 | Setup 8 | `4bdd755` |
-| 30 | Density/hygroscopicity switches, both settings | this commit |
+| 30 | Density/hygroscopicity switches, both settings | `d2d3fbf` |
 | 31 | Gas-phase index tables | `bf7eb5c` |
 | 32 | Budget index map + ADR-008 | `bed9160` |
 | 33 | `coag_mode` table + mask carriers | `3c5aaf4` |
@@ -182,7 +185,7 @@ All 18 tasks committed. Remaining before phase B closes: the adversarial review 
 `array_equal`, not `allclose`.
 
 Literals are **machine-extracted** from `ukca_mode_setup.F90`, never retyped:
-seven setups times ten tables is several hundred numbers, and a mistyped digit
+seven setups times eighteen tables is 1,351 numbers, and a mistyped digit
 gives plausible tables and a quietly wrong model. Same convention as
 `core/constants.py`. Everything derived is recomputed, which is what makes it a
 port rather than a copy.
@@ -275,9 +278,6 @@ out-of-range value silently leaves `rhocomp(cp_bc)` at its literal instead of
 failing — reproduced, not corrected, and captured as the `bc_oob` golden. And
 `i_tune_bc` is inert unless `l_radaer` is on, which the box model defaults off,
 so BC density tuning is unreachable by default.
-
-Remaining in phase C: 31 (gas-phase indices), 32 (budget index map + the
-static-vs-traced ADR), 33 (`coag_mode`).
 
 ## Phases D–K — physics: not started
 
