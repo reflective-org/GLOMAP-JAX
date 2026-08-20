@@ -12762,14 +12762,14 @@
         },
         "cubrt_x": {
           "dtype": "<f8",
-          "sha256": "fd7a8a81a2a8fa79ffb3809dff40b6c32fbaa42cfa0b378e667dbfb66ae93351",
+          "sha256": "488ac93d397f16992d9c555be60736635242cea998183304223c5f3b167cf916",
           "shape": [
             1865
           ]
         },
         "cubrt_y": {
           "dtype": "<f8",
-          "sha256": "bfd5e7dee5d06badf8de787b384367e587ec8c3b2816321f837296691eb801c4",
+          "sha256": "68b22e76d269a7ebb962ec811241f471e3385461dd89ab9a9612e453f50d2a9b",
           "shape": [
             1865
           ]
@@ -12804,14 +12804,14 @@
         },
         "log_x": {
           "dtype": "<f8",
-          "sha256": "b71b8c2f1a8a9d6e9fb94b0c03a4f6a35a61a9dd76847ff68f42e4f3f131ed4b",
+          "sha256": "6cea84247be9e0096a4d771362db50630d74d86025aba087eff1adcc5346e0e3",
           "shape": [
             2463
           ]
         },
         "log_y": {
           "dtype": "<f8",
-          "sha256": "bddedd8dc9f5c754399bd0cdc907a994bda2a532556b4a896caaf36a9b317f49",
+          "sha256": "828d0598a07a28cfd71b325ce68f3ce38a13d3019c03b6df416a48f909b63655",
           "shape": [
             2463
           ]
@@ -12832,14 +12832,14 @@
         },
         "oneover_x": {
           "dtype": "<f8",
-          "sha256": "d38e099a82aa3561bc8b2dbf5552851278f154184e43561dc3ab44d7ed2dede9",
+          "sha256": "c755338603b97bf186a3f9deaebce9492efea9be61d38290b2d7942d50ed1775",
           "shape": [
             2402
           ]
         },
         "oneover_y": {
           "dtype": "<f8",
-          "sha256": "d9104f2c218b1f50159c15c784c35f453922a53e25e6b16c2a915d0e6e5daee9",
+          "sha256": "6b8758aed885576aa35af0010d94acff874185c8e2b74aba4edc76e80ced89df",
           "shape": [
             2402
           ]
@@ -12853,14 +12853,14 @@
         },
         "pow_x": {
           "dtype": "<f8",
-          "sha256": "bbbf7792e3a7bcb92e043c5c89149b595370b4c01be0dcbd83306e0ecd4d3a24",
+          "sha256": "eea9eeb0b47babbb898ef6666be8732d1537f026c1d7c3469f12ba952ea2035b",
           "shape": [
             1865
           ]
         },
         "pow_y": {
           "dtype": "<f8",
-          "sha256": "ecd92900ad2df44b2d911ba80d1a9477156a3e3140818a26978ae9161aa17913",
+          "sha256": "65574a55c525cfb1bda95ad68ef0e8014338e113609006a5c933375b3c86fbfd",
           "shape": [
             5,
             1865
@@ -12881,7 +12881,7 @@
           ]
         }
       },
-      "content_sha256": "75cc7d4d0bd2549b96cbbc5da292cf5c8876077fe3eecddd19d7c49adb41979a",
+      "content_sha256": "5b5fbe2056755d5beaef6051ea35d10c9bfef7fb2203f181ba327b0d810b939a",
       "provenance": {
         "_case": "numerics",
         "_mode": "leaf",

@@ -17,7 +17,7 @@ The measurements, over 15,382 points:
 | `log`, `1/x` | bit-identical | safe |
 | `exp` | 456/3199 differ, max 2.1e-16 (1 ulp) | within tolerance, but real |
 | `x ** (1/3)` | bit-identical | **this** is what `cubrt_v` computes |
-| `np.cbrt` | 1756/1865 differ, max 1.3e-14 | must not be used |
+| `np.cbrt` | 1763/1865 differ, max 1.3e-14 | must not be used |
 | `NINT` | 64/642 differ — 64 of 129 ties | must not use `jnp.round` |
 
 No `fortran` marker: the golden is committed, so these run in CI. That matters
@@ -158,7 +158,7 @@ def test_cbrt_must_be_written_as_x_to_the_one_third(sweep):
     function, and the two are not the same computation.
 
     `x ** (1.0/3.0)` in JAX reproduces the Fortran bit for bit. `np.cbrt`
-    disagrees on 1756 of 1865 points, by up to 1.3e-14 — which is *below*
+    disagrees on 1763 of 1865 points, by up to 1.3e-14 — which is *below*
     `RTOL_ALGEBRAIC`. Since `cubrt_v` is what produces `drydp`, and `drydp`
     feeds `ukca_remode`'s merge threshold and `ukca_calc_drydiam`'s undersize
     reset, that is a branch-flipping difference and not a cosmetic one."""
@@ -178,6 +178,15 @@ def test_cbrt_must_be_written_as_x_to_the_one_third(sweep):
     # rewritten from a measurement.
     gap = np.max(np.abs((np.cbrt(x) - sweep["cubrt_y"]) / sweep["cubrt_y"]))
     assert gap < RTOL_ALGEBRAIC, f"cbrt gap {gap:.2e} is no longer below RTOL_ALGEBRAIC"
+
+    # The count in the docstring, pinned. It was 1756 until the grids stopped
+    # being built with np.logspace -- which is `10.0 ** linspace(...)`, so four
+    # of the abscissae were themselves one ulp off the correctly-rounded value
+    # and the *inputs* to this measurement were platform-dependent. Six
+    # documents quoted 1756. Anything quoting a count from this sweep should
+    # fail here first.
+    n_differ = int((np.cbrt(x) != sweep["cubrt_y"]).sum())
+    assert n_differ == 1763, f"np.cbrt now differs on {n_differ} of {len(x)}; update the prose"
 
 
 def test_cbrt_and_the_power_form_disagree_about_negative_inputs(sweep):

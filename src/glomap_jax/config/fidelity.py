@@ -123,7 +123,7 @@ class FidelityConfig:
     # NOT an upstream defect -- a place where JAX offers something better than
     # the Fortran and taking it would break the port. cubrt_v is literally
     # `x ** (1.0/3.0)`; jnp.cbrt is a genuinely better cube root, returns a real
-    # root for negative x where the power form gives NaN, and disagrees on 1756
+    # root for negative x where the power form gives NaN, and disagrees on 1763
     # of 1865 swept points by up to 1.3e-14. That output is drydp, which is
     # compared against dp_thresh1 and ddplim0*0.1 -- both step changes -- so the
     # difference flips a merge or an undersize reset rather than shifting a

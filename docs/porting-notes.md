@@ -149,7 +149,7 @@ Results against JAX on the CPU backend, float64:
 | `log`, `1/x` | bit-identical | safe |
 | `x ** (1.0/3.0)` | bit-identical (arm64) | **this** is what `cubrt_v` computes |
 | `exp` | 456/3199 differ, max 2.1e-16 | one ulp; inside tolerance but real |
-| `np.cbrt` | 1756/1865 differ, max 1.3e-14 | **must not be used** |
+| `np.cbrt` | 1763/1865 differ, max 1.3e-14 | **must not be used** |
 | `NINT` vs `round` | 64/642 differ | **must not use `jnp.round`** |
 
 Three rules follow, and all three are asserted in
