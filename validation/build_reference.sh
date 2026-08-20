@@ -27,7 +27,10 @@
 
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+# ${BASH_SOURCE[0]} rather than $0, so that sourcing this file (which is how
+# tests/test_reference_build.py drives the patch gates) still lands in the repo
+# root instead of wherever the sourcing shell happened to be.
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 REPO="$PWD"
 FORTRAN="$REPO/fortran"
 
@@ -53,8 +56,13 @@ stage_tree() {
 
   shopt -s nullglob
   for p in "$REPO"/validation/patches/*.patch; do
+    require_unified_diff "$p" || return 1
     verify_additive_for_ukca "$p" || return 1
-    if ! patch -d "$stage" -p1 --forward --silent < "$p"; then
+    # -u pins the interpretation to unified. Without it `patch` auto-detects,
+    # so a context or normal diff would be applied happily by a format the
+    # additive gate below cannot read. require_unified_diff already refuses
+    # those; this makes the two agree by construction rather than by review.
+    if ! patch -u -d "$stage" -p1 --forward --silent < "$p"; then
       echo "ERROR: overlay failed to apply: $(basename "$p")" >&2
       return 1
     fi
@@ -82,14 +90,120 @@ stage_tree() {
   echo "$stage"
 }
 
+require_unified_diff() {
+  # Refuse anything that is not a pure unified diff, BEFORE the additive gate
+  # below parses it.
+  #
+  # The phase C review demonstrated two ways past a gate that reads unified
+  # syntax while `patch` reads whatever it is handed. `patch` auto-detects
+  # unified, context and normal diffs, and both of the other two changed
+  # `se_ins = 1.0` to `0.3` in src/ukca/ukca_conden.F90 with the additive gate
+  # exiting 0:
+  #
+  #   context diff  `--- b/src/ukca/...` sets the path but no `+++ ` ever
+  #                 arrives, so the gate never arms; removals are `! ` lines.
+  #   normal diff   there are no `---`/`+++ ` headers at all. The file is named
+  #                 by an `Index:` line, the removal marker is `<`, and the
+  #                 `---` separator carries no trailing space.
+  #
+  # Teaching one awk three grammars would make the most security-relevant code
+  # in the harness also the most subtle. Instead there is exactly one accepted
+  # grammar, checked structurally here: prose, then one or more file sections of
+  # `--- ` / `+++ ` / `@@` with hunk bodies whose length matches the counts the
+  # `@@` header declares. Counting the bodies is what makes the additive gate
+  # exact -- it is then never guessing whether a `---` line is a header or the
+  # removal of a line whose text begins with `--`.
+  local patchfile="$1"
+  awk -v name="$(basename "$patchfile")" '
+    function reject(why) {
+      printf "ERROR: %s is not a unified diff: %s\n  line %d: %s\n",
+             name, why, NR, $0 > "/dev/stderr"
+      bad = 1
+      exit 1
+    }
+    function hunk_len(field,   n, parts) {
+      # "-81,26" -> 26; "-81" -> 1 (an omitted count means exactly one line).
+      n = split(field, parts, ",")
+      return (n == 2) ? parts[2] + 0 : 1
+    }
+
+    # Inside a hunk body every line is accounted for by the @@ counts.
+    body {
+      c = substr($0, 1, 1)
+      if (c == "\\") next                     # "\ No newline at end of file"
+      else if (c == "-") old--
+      else if (c == "+") new--
+      else if (c == " " || c == "") { old--; new-- }
+      else reject("hunk body line starts with " c ", not one of space + - \\")
+      if (old < 0 || new < 0) reject("hunk body is longer than its @@ header declares")
+      if (old == 0 && new == 0) body = 0
+      next
+    }
+
+    want_plus {
+      if ($0 !~ /^[+][+][+] /) reject("a \"--- \" header is not followed by \"+++ \"")
+      want_plus = 0; want_hunk = 1; seen_file = 1
+      next
+    }
+
+    want_hunk {
+      if ($0 !~ /^@@ /) reject("a \"+++ \" header is not followed by an @@ hunk")
+      want_hunk = 0
+      # falls through to the @@ rule
+    }
+
+    /^@@ / {
+      if (!seen_file) reject("an @@ hunk appears before any \"--- \"/\"+++ \" header")
+      if ($0 !~ /^@@ -[0-9]+(,[0-9]+)? [+][0-9]+(,[0-9]+)? @@/) reject("malformed @@ header")
+      old = hunk_len($2); new = hunk_len($3)
+      seen_hunk = 1
+      body = (old > 0 || new > 0)
+      next
+    }
+
+    /^--- / { want_plus = 1; next }
+
+    # Prose, and the `diff ...` lines that separate file sections. Nothing here
+    # may look to `patch` like the start of some other diff format.
+    {
+      if ($0 ~ /^[*][*][*]/) reject("a context-diff marker")
+      if ($0 ~ /^[+][+][+] /) reject("a \"+++ \" header with no \"--- \" before it")
+      if ($0 ~ /^[0-9]+(,[0-9]+)?[acd][0-9]+(,[0-9]+)?[ \t]*$/) reject("a normal-diff command")
+      if ($0 ~ /^---[ \t]*$/) reject("a normal-diff separator")
+      if ($0 ~ /^Index:[ \t]/) reject("an \"Index:\" header, which names a file the gates never read")
+    }
+
+    END {
+      if (bad) exit 1
+      if (body) { printf "ERROR: %s ends inside a hunk\n", name > "/dev/stderr"; exit 1 }
+      if (want_plus || want_hunk) {
+        printf "ERROR: %s ends on an incomplete file header\n", name > "/dev/stderr"
+        exit 1
+      }
+      if (!seen_hunk) {
+        printf "ERROR: %s contains no unified diff hunk at all\n", name > "/dev/stderr"
+        exit 1
+      }
+    }
+  ' "$patchfile" || {
+    echo "Overlays must be unified diffs (diff -u / git diff): the additive" >&2
+    echo "src/ukca/ gate can only read that one format." >&2
+    return 1
+  }
+}
+
 verify_additive_for_ukca() {
   # Reject a patch that removes any line from a file under src/ukca/.
+  #
+  # Assumes require_unified_diff has already passed, so the hunk counts can be
+  # trusted: the body rule below knows exactly which lines are hunk content and
+  # never has to disambiguate a `---` header from a removal by regex.
   local patchfile="$1"
-  # Both --- and +++ are inspected, and the path is normalised first. The phase
-  # B review found two ways past a check that looked only at +++ verbatim:
-  # `+++ b/src/box/../ukca/ukca_conden.F90` is applied by `patch -p1` to
-  # src/ukca/ but does not match the pattern, and a file deletion puts
-  # /dev/null on +++ with the UKCA path on ---.
+  # Every path the patch names is inspected -- the `diff` line, --- and +++ --
+  # and each is normalised first. The phase B review found two ways past a check
+  # that looked only at +++ verbatim: `+++ b/src/box/../ukca/ukca_conden.F90` is
+  # applied by `patch -p1` to src/ukca/ but does not match the pattern, and a
+  # file deletion puts /dev/null on +++ with the UKCA path on ---.
   awk -v name="$(basename "$patchfile")" '
     function norm(p,   out, n, i, parts, stack, top) {
       n = split(p, parts, "/"); top = 0
@@ -102,12 +216,40 @@ verify_additive_for_ukca() {
       for (i = 1; i <= top; i++) out = out "/" stack[i]
       return out
     }
-    /^--- / { from = norm($2) ; next }
-    /^\+\+\+ / { in_ukca = (norm($2) ~ /src\/ukca\// || from ~ /src\/ukca\//) ; next }
-    in_ukca && /^-/ && !/^---/ {
-      printf "ERROR: %s removes a line from src/ukca/: %s\n", name, $0 > "/dev/stderr"
-      bad = 1
+    function hunk_len(field,   n, parts) {
+      n = split(field, parts, ",")
+      return (n == 2) ? parts[2] + 0 : 1
     }
+
+    body {
+      c = substr($0, 1, 1)
+      if (c == "\\") next
+      else if (c == "-") {
+        old--
+        if (in_ukca) {
+          printf "ERROR: %s removes a line from src/ukca/: %s\n", name, $0 > "/dev/stderr"
+          bad = 1
+        }
+      }
+      else if (c == "+") new--
+      else { old--; new-- }
+      if (old <= 0 && new <= 0) body = 0
+      next
+    }
+
+    /^diff / {
+      hint = 0
+      for (i = 2; i <= NF; i++) if (norm($i) ~ /src\/ukca\//) hint = 1
+      next
+    }
+    /^--- / { from = norm($2); next }
+    /^[+][+][+] / {
+      in_ukca = (norm($2) ~ /src\/ukca\// || from ~ /src\/ukca\// || hint)
+      from = ""; hint = 0
+      next
+    }
+    /^@@ / { old = hunk_len($2); new = hunk_len($3); body = (old > 0 || new > 0); next }
+
     END { exit bad ? 1 : 0 }
   ' "$patchfile" || {
     echo "src/ukca/ may be instrumented (insertions only), never modified." >&2
@@ -179,4 +321,11 @@ main() {
   echo "==> reference build complete"
 }
 
-main "$@"
+# Sourcing the script defines the gates without building anything, so
+# tests/test_reference_build.py can drive require_unified_diff and
+# verify_additive_for_ukca directly over fixture patches. Without this hook the
+# file has no testable surface that does not need gfortran, which is how the
+# additive gate reached phase C with no test at all.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+  main "$@"
+fi

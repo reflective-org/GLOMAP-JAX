@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Content manifest for the golden archives, and the gate that checks it.
 
-    python validation/goldens_manifest.py --check     # exit 1 on drift
-    python validation/goldens_manifest.py --write     # regenerate
+    python validation/goldens_manifest.py              # exit 1 on drift
+    python validation/goldens_manifest.py --check      # the same, spelled out
+    python validation/goldens_manifest.py --write      # regenerate
 
 A golden that changes silently is worse than no golden: the suite goes on
 passing and the reference it is passing against is no longer the one anybody
@@ -18,11 +19,18 @@ different things and call for different responses:
     missing  a listed archive is gone             -> a partial checkout or a
                                                      deleted fixture
 
-**Array contents are hashed, not the `.npz` file.** `np.savez_compressed` writes
-a zip, and zip entries carry a modification timestamp, so the same data written
-twice gives two different file hashes. A file-level hash would fail on every
-regeneration and be loosened away within a week. Hashing the decoded arrays also
-means the manifest says something a human can act on — *which* array moved.
+**Array contents are hashed, not the `.npz` file.** Not for the reason an
+earlier version of this docstring gave: `np.savez_compressed` writes a zip, but
+numpy stamps every member with the DOS epoch `(1980, 1, 1)`, so the same data
+written twice really does give identical bytes (measured, numpy 2.5). The
+reasons are the two that survive checking:
+
+* A file hash says only *that* something moved. The manifest exists to say
+  *which* array moved, and a per-array digest is the only thing that can.
+* A file hash is a hash of the container, not of the data. Compression level,
+  member order and zip metadata belong to numpy and zlib, so a numpy upgrade
+  that changed any of them would fail the gate on data that had not moved —
+  and a gate that fails on non-findings gets loosened.
 
 The manifest must pass with **zero** fixtures. It lands before the goldens do
 (task 17 before task 19), so an empty goldens directory with no manifest is a
@@ -205,7 +213,14 @@ def _explain_drift(name: str, expected: dict, actual: dict) -> list[str]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--write", action="store_true", help="regenerate the manifest")
+    # --check is what this module's own docstring and docs/REFERENCE_BUILD.md
+    # have always told people to run; before it existed the documented command
+    # exited 2 with "unrecognized arguments". Verifying is also what a bare
+    # invocation does, so the flag is an alias -- but a documented one that
+    # errors out is worse than either, and two documents expect this spelling.
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--check", action="store_true", help="verify the manifest (the default)")
+    mode.add_argument("--write", action="store_true", help="regenerate the manifest")
     parser.add_argument("--goldens", type=Path, default=GOLDENS)
     args = parser.parse_args(argv)
 

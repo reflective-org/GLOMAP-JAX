@@ -30,8 +30,11 @@ LFS question; this script reports what it wrote so that decision has numbers
 behind it.
 
 Provenance travels with the data: every archive carries the case, mode, variant,
-step count and a hash of the exact namelist that produced it, so task 17's
-manifest gate can tell a stale golden from a regenerated one.
+step count and a hash of the namelist that produced it, so task 17's manifest
+gate can tell a stale golden from a regenerated one. That hash is taken over the
+namelist with the capture's scratch paths normalised out (`_canonical_namelist`),
+because a hash that moves on every run identifies the run rather than the
+namelist and makes the drift gate's provenance message meaningless.
 """
 
 from __future__ import annotations
@@ -152,6 +155,36 @@ def _rewrite_namelist(source: Path, key: str, target: Path, steps: int | None) -
     return text
 
 
+def _canonical_namelist(text: str) -> str:
+    """The namelist with the capture run's scratch paths taken back out.
+
+    `_rewrite_namelist` points the output keys at a `TemporaryDirectory()`, so
+    the text it returns carries a path that is different on every single run.
+    Hashing it directly answered "was this the same *run*", which is never a
+    useful question and always no: every golden's `_namelist_sha256` moved on
+    every regeneration even when every number in the archive was identical, and
+    `_explain_drift` therefore emitted "regenerated from a different namelist or
+    variant" unconditionally -- which is how a real signal gets ignored.
+
+    Each output key keeps its *state* (set, or silenced to `''`) because that is
+    a property of the capture, and loses its value because that is a property of
+    the temporary directory.
+    """
+    for mode_key, _ in MODES.values():
+        text = re.sub(
+            rf"^(\s*{mode_key}\s*=\s*')([^']*)('\s*)$",
+            lambda m: m.group(1) + ("<capture>" if m.group(2) else "") + m.group(3),
+            text,
+            flags=re.MULTILINE,
+        )
+    return text
+
+
+def _namelist_sha256(text: str) -> str:
+    """Identify the namelist, not the run. See `_canonical_namelist`."""
+    return hashlib.sha256(_canonical_namelist(text).encode()).hexdigest()
+
+
 def _read_csv(path: Path) -> tuple[list[str], list[list[str]]]:
     with path.open(newline="") as fh:
         rows = list(csv.reader(fh))
@@ -233,7 +266,7 @@ def capture(job: Job, out_dir: Path, quiet: bool = False) -> Path:
         arrays["_mode"] = np.array(job.mode)
         arrays["_variant"] = np.array(job.variant)
         arrays["_rows"] = np.array(len(rows), dtype=np.int64)
-        arrays["_namelist_sha256"] = np.array(hashlib.sha256(nml_text.encode()).hexdigest())
+        arrays["_namelist_sha256"] = np.array(_namelist_sha256(nml_text))
 
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"{job.stem}.npz"
