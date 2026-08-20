@@ -163,7 +163,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 
 All 18 tasks committed. Remaining before phase B closes: the adversarial review of the phase diff against the Fortran, with findings filed as issues.
 
-## Phase C — mode tables and indices: **6/10**
+## Phase C — mode tables and indices: **7/10**
 
 | # | Task | Commit |
 |---|---|---|
@@ -172,7 +172,8 @@ All 18 tasks committed. Remaining before phase B closes: the adversarial review 
 | 26 | Setups 2, 3 | this commit |
 | 27 | Setups 4, 5 | this commit |
 | 28 | Setup 6 (dust-only) | this commit |
-| 29 | Setup 8 | this commit |
+| 29 | Setup 8 | `4bdd755` |
+| 30 | Density/hygroscopicity switches, both settings | this commit |
 
 **182/182 field comparisons byte-equal** across all seven setups —
 `array_equal`, not `allclose`.
@@ -197,9 +198,21 @@ byte equality and each now pinned as its own test:
   `l_fix_ukca_hygroscopicities` is also on. Reading it as an independent knob
   selects the default branch and gets all seven setups wrong identically.
 
-Remaining in phase C: 30 (density/hygroscopicity switches at both settings),
-31 (gas-phase indices), 32 (budget index map + the static-vs-traced ADR),
-33 (`coag_mode`).
+**Task 30** captures eight switch combinations per setup — 56 golden records —
+and every one is byte-equal. The switches split two ways, which is worth
+stating because issue #10 lumped them together: `l_fix_nacl_density` selects
+between a wrong number and its correction, so it is a fidelity flag;
+`l_radaer`, `i_tune_bc` and `l_dust_mp_ageing` are model configuration and
+belong to `ModelConfig`.
+
+Two behaviours pinned there. `i_tune_bc` has no `CASE DEFAULT`, so an
+out-of-range value silently leaves `rhocomp(cp_bc)` at its literal instead of
+failing — reproduced, not corrected, and captured as the `bc_oob` golden. And
+`i_tune_bc` is inert unless `l_radaer` is on, which the box model defaults off,
+so BC density tuning is unreachable by default.
+
+Remaining in phase C: 31 (gas-phase indices), 32 (budget index map + the
+static-vs-traced ADR), 33 (`coag_mode`).
 
 ## Phases D–K — physics: not started
 

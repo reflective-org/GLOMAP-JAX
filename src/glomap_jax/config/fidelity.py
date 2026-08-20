@@ -117,6 +117,17 @@ class FidelityConfig:
     # digit. Default False = reproduce the Fortran. See core/numerics.cbrt.
     cbrt_exact: bool = False
 
+    # The corrected NaCl density. UKCA's literal rhocomp(cp_cl) is 1600 kg/m3;
+    # the real value is 2165, and l_fix_nacl_density substitutes it. A genuine
+    # fidelity flag -- it selects between a wrong number and its correction --
+    # and the box model defaults it ON, so True is what reproduces the
+    # reference here even though False is what the literal says.
+    #
+    # It also reaches no_ions, but only when l_fix_ukca_hygroscopicities is
+    # also on: ukca_mode_setup.F90:168 tests both, so this is not an
+    # independent knob for that table.
+    l_fix_nacl_density: bool = True
+
     def __post_init__(self):
         if self.iextra_checks > 1:
             raise NotImplementedError(

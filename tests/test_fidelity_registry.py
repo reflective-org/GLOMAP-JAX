@@ -37,6 +37,7 @@ FORTRAN_BEHAVIOUR = {
     "checkmd_nd": False,
     "iextra_checks": 0,
     "cbrt_exact": False,
+    "l_fix_nacl_density": True,
 }
 
 

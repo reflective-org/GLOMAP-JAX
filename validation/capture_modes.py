@@ -44,6 +44,38 @@ ARCHIVE = "modes.f64.tables.npz"
 
 SETUPS = (1, 2, 3, 4, 5, 6, 8)
 
+# Switch combinations. Not a cross product: the five switches touch only
+# rhocomp, no_ions and topmode, so what is worth capturing is each switch moved
+# off its default, plus the one pair that interacts.
+#
+# `i_tune_bc` has exactly TWO named values, 1 (tuned) and 2 (mg_mix), and the
+# SELECT CASE that reads them has **no CASE DEFAULT** -- so a third, unnamed
+# case exists: any other value silently leaves rhocomp(cp_bc) at its literal.
+# `oob` captures that, because a silent fall-through is a behaviour the port
+# has to reproduce whether or not it is intended. (Same shape as UP-5's
+# unchecked icoag.)
+#
+# Note i_tune_bc is inert unless l_radaer is on, which the box model defaults
+# off -- so the two BC combinations both set it.
+COMBOS: dict[str, dict] = {
+    "default": {},
+    "nacl_off": {"l_fix_nacl_density": False},
+    "hygro_off": {"l_fix_ukca_hygroscopicities": False},
+    "both_off": {"l_fix_nacl_density": False, "l_fix_ukca_hygroscopicities": False},
+    "bc_tuned": {"l_radaer": True, "i_tune_bc": 1},
+    "bc_mg_mix": {"l_radaer": True, "i_tune_bc": 2},
+    "bc_oob": {"l_radaer": True, "i_tune_bc": 3},
+    "dust_ageing": {"l_dust_mp_ageing": True},
+}
+
+SWITCH_DEFAULTS = {
+    "l_radaer": ".FALSE.",
+    "i_tune_bc": "1",
+    "l_fix_nacl_density": ".TRUE.",
+    "l_fix_ukca_hygroscopicities": ".TRUE.",
+    "l_dust_mp_ageing": ".FALSE.",
+}
+
 MODE_REAL = (
     "fracbcem",
     "fracocem",
@@ -64,7 +96,24 @@ MODE_CP_REAL = ("mfrac_0",)
 MODE_CP_INT = ("component_mode", "component")
 
 
-def capture_one(setup: int) -> dict:
+def _switch_lines(overrides: dict) -> str:
+    """Namelist lines for one combination, written explicitly.
+
+    Every switch is emitted, not just the overridden ones: relying on a
+    namelist default means the capture silently changes if the default ever
+    does, and the golden would move with no diff to explain it.
+    """
+    values = dict(SWITCH_DEFAULTS)
+    for key, value in overrides.items():
+        values[key] = (
+            str(value)
+            if isinstance(value, int) and not isinstance(value, bool)
+            else (".TRUE." if value else ".FALSE.")
+        )
+    return "".join(f"\n  {k} = {v}" for k, v in values.items())
+
+
+def capture_one(setup: int, combo: str = "default") -> dict:
     """Run one setup in its own process and return every table as lists."""
     script = textwrap.dedent(f"""
         import json, sys
@@ -78,6 +127,12 @@ def capture_one(setup: int) -> dict:
         import re, tempfile, pathlib
         text = re.sub(r'^(\\s*i_mode_setup\\s*=\\s*)\\d+', r'\\g<1>{setup}',
                       text, count=1, flags=re.MULTILINE)
+        # Every switch is written explicitly into &box_aerosol, so the capture
+        # never depends on a namelist default that might change.
+        switches = {_switch_lines(COMBOS[combo])!r}
+        text, n = re.subn(r'^(&box_aerosol)', lambda m: m.group(1) + switches,
+                          text, count=1, flags=re.MULTILINE)
+        assert n == 1, 'failed to inject switches into &box_aerosol'
         d = pathlib.Path(tempfile.mkdtemp())
         nml = d / 'setup.nml'
         nml.write_text(text)
@@ -125,6 +180,22 @@ def capture_one(setup: int) -> dict:
     return json.loads(proc.stdout[proc.stdout.rindex("@@RESULT@@") + 10 :])
 
 
+def _store(arrays: dict, setup: int, combo: str, rec: dict) -> None:
+    """Default combination keeps the bare `s<setup>_<field>` key so the
+    existing goldens and tests are unchanged; variants are prefixed."""
+    prefix = f"s{setup}_" if combo == "default" else f"v_{combo}_s{setup}_"
+    for key, value in rec.items():
+        if key == "setup":
+            continue
+        name = prefix + key
+        if key == "component_names":
+            arrays[name] = np.array(value, dtype=np.str_)
+        elif key in MODE_INT + CP_INT + MODE_CP_INT or key in ("nmodes", "ncp", "topmode"):
+            arrays[name] = np.array(value, dtype=np.int32)
+        else:
+            arrays[name] = np.array(value, dtype=np.float64)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
@@ -132,9 +203,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.dry_run:
-        print(f"{len(SETUPS)} setups -> {args.out / ARCHIVE}")
+        print(f"{len(SETUPS)} setups x {len(COMBOS)} switch combinations -> {args.out / ARCHIVE}")
         for s in SETUPS:
             print(f"  i_mode_setup = {s}")
+        for c, o in COMBOS.items():
+            print(f"  {c:<12} {o or '(box model defaults)'}")
         fields = (
             MODE_REAL
             + MODE_INT
@@ -148,27 +221,23 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     arrays: dict[str, np.ndarray] = {}
-    for setup in SETUPS:
-        rec = capture_one(setup)
-        print(
-            f"  setup {setup}: ncp={rec['ncp']} topmode={rec['topmode']} "
-            f"active={sum(rec['mode'])} modes"
-        )
-        for key, value in rec.items():
-            if key == "setup":
-                continue
-            name = f"s{setup}_{key}"
-            if key == "component_names":
-                arrays[name] = np.array(value, dtype=np.str_)
-            elif key in MODE_INT + CP_INT + MODE_CP_INT or key in ("nmodes", "ncp", "topmode"):
-                arrays[name] = np.array(value, dtype=np.int32)
-            else:
-                arrays[name] = np.array(value, dtype=np.float64)
+    for combo in COMBOS:
+        for setup in SETUPS:
+            rec = capture_one(setup, combo)
+            if combo == "default":
+                print(
+                    f"  setup {setup}: ncp={rec['ncp']} topmode={rec['topmode']} "
+                    f"active={sum(rec['mode'])} modes"
+                )
+            _store(arrays, setup, combo, rec)
+        if combo != "default":
+            print(f"  {combo:<12} captured for {len(SETUPS)} setups")
 
     arrays["_case"] = np.array("modes")
     arrays["_mode"] = np.array("tables")
     arrays["_variant"] = np.array("f64")
     arrays["_setups"] = np.array(SETUPS, dtype=np.int32)
+    arrays["_combos"] = np.array(list(COMBOS), dtype=np.str_)
     arrays["_rows"] = np.array(len(arrays), dtype=np.int64)
 
     args.out.mkdir(parents=True, exist_ok=True)

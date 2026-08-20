@@ -232,3 +232,98 @@ def test_component_is_the_three_way_intersection(golden, built):
     present = built.component
     assert not (present & ~permitted).any()
     assert (permitted & ~present).any(), "the two tables are identical here"
+
+
+# --------------------------------------------------------------------------
+# Task 30: every switch, at both settings, byte-equal.
+#
+# The acceptance criterion is "both settings", not "the default" — a flag whose
+# non-default branch is never compared is a decision that looks tested. Each
+# combination below is a separately captured golden; see validation/capture_modes.py.
+# --------------------------------------------------------------------------
+
+COMBOS = {
+    "nacl_off": {"l_fix_nacl_density": False},
+    "hygro_off": {"l_fix_ukca_hygroscopicities": False},
+    "both_off": {"l_fix_nacl_density": False, "l_fix_ukca_hygroscopicities": False},
+    "bc_tuned": {"l_radaer": True, "i_tune_bc": 1},
+    "bc_mg_mix": {"l_radaer": True, "i_tune_bc": 2},
+    "bc_oob": {"l_radaer": True, "i_tune_bc": 3},
+    "dust_ageing": {"l_dust_mp_ageing": True},
+}
+
+
+@pytest.mark.parametrize("combo", sorted(COMBOS))
+@pytest.mark.parametrize("setup", SETUPS)
+def test_switch_combination_is_byte_equal(golden, setup, combo):
+    built = modes.build(setup, **COMBOS[combo])
+    for field in ARRAY_FIELDS:
+        got = np.asarray(getattr(built, field))
+        if got.dtype == bool:
+            got = got.astype(np.int32)
+        np.testing.assert_array_equal(
+            got, golden[f"v_{combo}_s{setup}_{field}"], err_msg=f"{combo}/s{setup}/{field}"
+        )
+    assert built.topmode == int(golden[f"v_{combo}_s{setup}_topmode"])
+
+
+@pytest.mark.parametrize("combo", sorted(COMBOS))
+def test_each_combination_actually_changes_something(golden, combo):
+    """Except `bc_oob`, which is captured precisely because it changes nothing.
+
+    Without this, a combination whose switches never reached the Fortran would
+    pass every byte-equality check above by being identical to the default —
+    which is exactly what happened while building this: the namelist injection
+    silently failed and all seven combinations matched the default."""
+    watched = ("rhocomp", "no_ions", "mmid", "mlo", "mhi", "topmode")
+    moved = [
+        f for f in watched if not np.array_equal(golden[f"v_{combo}_s1_{f}"], golden[f"s1_{f}"])
+    ]
+    if combo == "bc_oob":
+        assert not moved, "an out-of-range i_tune_bc should fall through silently"
+    else:
+        assert moved, f"{combo} is identical to the default; did its switches apply?"
+
+
+def test_an_out_of_range_i_tune_bc_falls_through_silently(golden):
+    """`ukca_mode_setup.F90:425-430` has no `CASE DEFAULT`, so a value that is
+    neither 1 nor 2 leaves `rhocomp(cp_bc)` at its literal instead of failing.
+
+    Reproduced rather than corrected: the port matches the reference including
+    its silences, and this is the kind of silence a user hits by typo. It is
+    the same shape as UP-5's unchecked `icoag`."""
+    literal = golden["s1_rhocomp"][modes.CP_BC]
+    assert golden["v_bc_tuned_s1_rhocomp"][modes.CP_BC] == modes.RHO_BC_TUNED
+    assert golden["v_bc_mg_mix_s1_rhocomp"][modes.CP_BC] == modes.RHO_BC_MG_MIX
+    assert golden["v_bc_oob_s1_rhocomp"][modes.CP_BC] == literal
+    np.testing.assert_array_equal(
+        modes.build(1, l_radaer=True, i_tune_bc=3).rhocomp, golden["s1_rhocomp"]
+    )
+
+
+def test_i_tune_bc_is_inert_without_l_radaer(golden):
+    """It is read only inside `IF (l_radaer_in)`, and the box model defaults
+    that off — so the BC density tuning is unreachable by default."""
+    for value in (1, 2, 3):
+        np.testing.assert_array_equal(
+            modes.build(1, l_radaer=False, i_tune_bc=value).rhocomp, golden["s1_rhocomp"]
+        )
+
+
+def test_dust_ageing_moves_topmode_and_nothing_else(golden):
+    """`topmode` is the only thing it touches — but it is read by `conden`,
+    `ageing` and `coagwithnucl` loop bounds, so the effect downstream is large."""
+    assert int(golden["v_dust_ageing_s1_topmode"]) == modes.NMODES
+    assert int(golden["s1_topmode"]) == modes.MODE_AIT_INSOL + 1
+    for field in ARRAY_FIELDS:
+        np.testing.assert_array_equal(
+            golden[f"v_dust_ageing_s1_{field}"], golden[f"s1_{field}"], err_msg=field
+        )
+
+
+def test_the_nacl_density_switch_moves_the_masses_by_the_density_ratio(golden):
+    """Confirms the switch is applied to `rhocomp` before the masses derive
+    from it, not after."""
+    on = golden["s1_mmid"][modes.MODE_COR_SOL]
+    off = golden["v_nacl_off_s1_mmid"][modes.MODE_COR_SOL]
+    assert abs(on / off - modes.RHO_NACL / 1600.0) < 1e-12

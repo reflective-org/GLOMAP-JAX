@@ -62,6 +62,28 @@ class ModelConfig:
     ifuchs: int = 1  # 1 Fuchs(1964), 2 Fuchs-Sutugin(1971)
     idcmfp: int = 1  # diffusion / mean-free-path variant
     icondiam: int = 1  # 1 geometric mean, 2 condensation diameter
+
+    # Mode-table switches. These reach `common_mode_setup_interface` and change
+    # glomap_variables itself, not a process, so they are configuration rather
+    # than fidelity: none of them selects between a bug and its fix. Contrast
+    # `l_fix_nacl_density` and `l_fix_ukca_hygroscopicities`, which do, and live
+    # in FidelityConfig.
+    #
+    # l_dust_mp_ageing sets `topmode` -- `nmodes` when true, `mode_ait_insol`
+    # (5) otherwise, regardless of how many modes are active. Loops written
+    # `DO imode = 1, topmode` therefore stop at 5 by default even on setup 8,
+    # where modes 6 and 7 are on. See docs/porting-notes.md.
+    l_dust_mp_ageing: bool = False
+
+    # l_radaer gates i_tune_bc; with it off, i_tune_bc is inert.
+    l_radaer: bool = False
+
+    # 1 = tuned (1900), 2 = Mie-mixture (1800). There is NO `CASE DEFAULT` in
+    # ukca_mode_setup.F90:425-430, so any other value silently leaves
+    # rhocomp(cp_bc) at its literal 1500 rather than failing -- captured as the
+    # `bc_oob` golden. Not range-checked here either, because the port
+    # reproduces the reference including its silences; the golden records it.
+    i_tune_bc: int = 1
     intraoff: bool = False
     interoff: bool = False
 

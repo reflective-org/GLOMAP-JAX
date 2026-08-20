@@ -231,3 +231,27 @@ would produce the first time it was not.
 Setting `True` selects `jnp.cbrt`. It will disagree with every committed golden,
 which is the correct behaviour for an accuracy option: it belongs to order 2,
 alongside diffrax, not to the faithful path.
+
+## `l_fix_nacl_density`
+
+**Default `True` — matches the box model**, which is worth stating carefully
+because for once the default is *not* "reproduce the literal".
+
+`ukca_mode_setup.F90` lays down `rhocomp(cp_cl) = 1600.0` kg m⁻³ for sea salt,
+then substitutes `rho_nacl = 2165.0` at `:433-435` when the flag is on. 2165 is
+the correct density of NaCl; 1600 is not. `glomap_box_config_mod` sets the flag
+`.TRUE.`, so the reference this port is validated against uses 2165 — and
+reproducing the reference means defaulting to the corrected value.
+
+The switch is applied to `rhocomp` **before** the mode masses are derived from
+it, so it moves `mmid`, `mlo` and `mhi` too — by the full 2165/1600 ratio, 35%,
+on any mode carrying sea salt. Applying it after the masses would leave them
+built from the uncorrected density, silently. Captured at both settings as the
+`nacl_off` golden.
+
+It also reaches `no_ions`, but not independently: `:168` tests
+`l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density`, so with
+hygroscopicities off this flag has no effect on that table at all.
+
+Setting `False` reverts to the literal 1600 and will disagree with every
+golden.
