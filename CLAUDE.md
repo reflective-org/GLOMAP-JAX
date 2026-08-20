@@ -160,7 +160,7 @@ Measured over 15,382 points against the Fortran itself
 |---|---|
 | `erf`, `log`, `1/x`, `x**(1/3)` | **bit-identical on the capture platform** (arm64); `erf` and the powers drift ≤2 ulp on x86_64 |
 | `exp` | 456/3199 differ, max 2.1e-16 — 1 ulp, inside tolerance |
-| `jnp.cbrt` | 1763/1865 differ, max 1.3e-14 — **do not use** |
+| `jnp.cbrt` | 1763/1865 differ on arm64, 1793 on x86_64, max 1.3e-14 — **do not use** |
 | `jnp.round` | 64 of 129 ties differ — **do not use** |
 
 **Cube root is `x ** (1.0/3.0)`, never `jnp.cbrt`.** `cubrt_v` is literally that

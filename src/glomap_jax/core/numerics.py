@@ -16,7 +16,7 @@ primitive        JAX vs gfortran                      verdict
 ``log``, ``1/x`` bit-identical                        use them directly
 ``x**(1/3)``     bit-identical, 1865/1865 (arm64)     **this** is ``cubrt_v``
 ``exp``          456/3199 differ, max 2.1e-16         1 ulp; inside tolerance
-``jnp.cbrt``     1763/1865 differ, max 1.3e-14        **do not use** by default
+``jnp.cbrt``     1763/1865 differ (arm64), max 1.3e-14 **do not use** by default
 ``jnp.round``    64 of 129 ties differ                **do not use**
 ===============  ===================================  =========================
 
