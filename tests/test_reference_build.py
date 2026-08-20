@@ -393,3 +393,40 @@ def test_every_committed_overlay_passes_both_gates(patch, tmp_path):
     grammar or regenerates an overlay with a different tool."""
     result = run_gates(patch.read_text(encoding="utf-8"), tmp_path)
     assert result.returncode == 0, f"{patch.name} rejected:\n{result.stderr}"
+
+
+def test_the_additive_gate_alone_would_let_a_context_diff_through(tmp_path):
+    """Why the two gates must stay in this order, asserted rather than assumed.
+
+    `require_unified_diff` is not a tidiness check in front of the real gate --
+    it *is* the protection for every format the additive gate cannot parse. Run
+    the additive gate on its own and the context diff that deletes
+    `se_ins = 1.0` from `src/ukca/` sails through, because no `+++ ` line ever
+    arrives to arm it.
+
+    So this test asserts the hole exists. If someone later teaches the additive
+    gate to read context diffs, this fails and should simply be deleted. What
+    it must never do is fail because the two calls were reordered or the format
+    gate was dropped as redundant -- which is the change this exists to block,
+    and which nothing else in the file would catch.
+    """
+    assert (
+        run_gates(CONTEXT_DIFF_IN_UKCA, tmp_path, gate="verify_additive_for_ukca").returncode == 0
+    )
+    assert run_gates(CONTEXT_DIFF_IN_UKCA, tmp_path).returncode != 0
+
+
+def test_stage_tree_runs_the_format_gate_before_it_applies_anything(tmp_path):
+    """The ordering the test above depends on, read out of the script itself.
+
+    `run_gates` reproduces stage_tree's sequence by hand, so on its own it
+    proves nothing about what stage_tree actually does. This pins the real
+    call order, and that exactly one site applies a patch.
+    """
+    body = BUILD_SCRIPT.read_text(encoding="utf-8")
+    fmt = body.index('require_unified_diff "$p"')
+    additive = body.index('verify_additive_for_ukca "$p"')
+    apply_sites = [i for i in range(len(body)) if body.startswith("patch -u -d", i)]
+    assert fmt < additive, "the format gate must run before the additive gate"
+    assert len(apply_sites) == 1, f"expected one patch application site, found {len(apply_sites)}"
+    assert additive < apply_sites[0], "both gates must run before the patch is applied"

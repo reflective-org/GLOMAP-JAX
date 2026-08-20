@@ -137,7 +137,7 @@ class FidelityConfig:
     # reference here even though False is what the literal says.
     #
     # It also reaches no_ions, but only when l_fix_ukca_hygroscopicities is
-    # also on: ukca_mode_setup.F90:474-475 tests both, so this is not an
+    # also on: ukca_mode_setup.F90:678-679 tests both, so this is not an
     # independent knob for that table.
     l_fix_nacl_density: bool = True
 

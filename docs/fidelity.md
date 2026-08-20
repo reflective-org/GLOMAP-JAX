@@ -250,7 +250,7 @@ on any mode carrying sea salt. Applying it after the masses would leave them
 built from the uncorrected density, silently. Captured at both settings as the
 `nacl_off` golden.
 
-It also reaches `no_ions`, but not independently: `:474-475` tests
+It also reaches `no_ions`, but not independently: `:678-679` tests
 `l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density`, so with
 hygroscopicities off this flag has no effect on that table at all.
 

@@ -229,7 +229,7 @@ built from the uncorrected density, silently, and by 35% on any mode carrying
 sea salt.
 
 **A nested `.AND.` is not two independent knobs.**
-`ukca_mode_setup.F90:474-475` tests
+`ukca_mode_setup.F90:678-679` tests
 `l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density` before assigning
 `no_ions`, so NaCl density only reaches that table when hygroscopicities is
 also on. Reading them as independent selects the default branch and gets all
@@ -257,6 +257,25 @@ setup — including setup 8, where modes 6 and 7 are active. Loops written
 
 This is what made UP-10's impact claim wrong twice — three of its four lines
 are gated on `topmode > mode_ait_insol`, which is false by default.
+
+## `ukca_mode_allcp_4mode` is dead code, and citations drift into it
+
+`ukca_mode_setup.F90:305-509` defines `ukca_mode_allcp_4mode`. Nothing calls
+it — it appears nowhere else in `fortran/src/`, and
+`common_mode_setup_interface_mod`'s `SELECT CASE` has no branch for it. It is a
+200-line near-duplicate of `ukca_mode_suss_4mode` (`:511-714`), the live
+setup-1 routine.
+
+That matters for more than tidiness. Every switch block exists twice with
+identical text, so a citation found by grepping for the *content* lands in the
+dead copy about half the time and looks right on inspection. It has now
+happened twice here: `:168` was corrected to `:474-475` after confirming the
+line said exactly what the citation claimed — and `:474` is inside the dead
+routine. The live line is `:678-679`.
+
+**Check the enclosing routine, not just the line text.** Pinned by
+`tests/test_modes.py::test_the_dead_routine_really_is_dead` and the
+machine-checked `CITATIONS` table beside it.
 
 ## `component_mode` is a permission table, not a presence table
 
