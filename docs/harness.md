@@ -110,16 +110,38 @@ documented. See [reference build](REFERENCE_BUILD.md).
 
 ## Gate B — per-process, per-substep
 
-`ukca_aero_step` calls thirteen process routines per chemistry step, fifteen
-substeps deep. Comparing only the end state tells you *that* a port diverged;
-comparing after each call tells you *where*.
+`ukca_aero_step` runs its process routines under two nested substep loops:
+`nmts` microphysics timesteps (`:826`), each containing `nzts`
+condensation/nucleation competition substeps (`:878`). Comparing only the end
+state tells you *that* a port diverged; comparing after each call tells you
+*where*.
 
 Two dumps, because neither is sufficient:
 
 * `budget_file` — the 283 per-process mass fluxes in `bud_aer_mas`;
 * `state_file` — `nd`, `mdt`, `md`, `drydp`, `wetdp`, `mdwat`, `rhopar` after
-  each of the thirteen calls, tagged `(step, seq, imts, izts)`, plus `h2so4`,
-  `delh2so4_nucl`, `sec_org` and `s_cond_s` at the nucleation call.
+  each of the thirteen instrumented call sites, tagged `(step, seq, imts,
+  izts)`, plus `h2so4`, `delh2so4_nucl`, `sec_org` and `s_cond_s` at the
+  nucleation call.
+
+Thirteen **call sites**, not thirteen routines:
+`validation/patches/0003-dump-state.patch` has thirteen `CALL dump_state`
+lines naming seven distinct routines, and `site_levels` in any committed
+`*.f64.state.npz` lists exactly those seven — `drydiam`, `remode`,
+`volume_mode`, `conden`, `calcnucrate`, `coagwithnucl`, `ageing`. Seven of the
+seventeen distinct science routines `ukca_aero_step` calls: the dump
+instruments the microphysics core, not the scavenging, oxidation and deposition
+around it.
+
+How many dumps that is per chemistry step depends on the two substep counts,
+and every number below is a *configuration* number rather than a property of
+the code. It is `4 + 5·nmts + 5·nmts·nzts`, from `drydiam` `2 + 2·nmts`,
+`remode` `1 + nmts`, `volume_mode` `1 + 2·nmts`, `calcnucrate` `2·nmts·nzts`
+and `conden`, `coagwithnucl`, `ageing` `nmts·nzts` each. The three shipped
+namelists set `nmts = 1, nzts = 15`, giving 84; this repo's
+`inputs/namelists/bl_nmts3.nml` sets `nmts = 3, nzts = 5`, giving 94. Both are
+read straight off the goldens — `seq` runs 1…84 in
+`boundary_layer.f64.state.npz` and 1…94 in `bl_nmts3.f64.state.npz`.
 
 Two things about that key are worth knowing, because both were wrong until the
 phase B review. `seq` is a per-step call counter and it is **load-bearing**:
@@ -163,9 +185,14 @@ exist.
 * **It does not modify `fortran/`.** Instrumentation is applied to a staged
   copy, and a patch touching `src/ukca/` may only *add* lines, checked
   mechanically on the patch text.
-* **It does not auto-bless a capture.** `goldens_manifest.py --write` is always
-  an explicit act, because auto-blessing would make the drift gate silent the
-  one time it matters.
+* **It does not auto-bless a capture in CI.** Nothing on any automated path
+  rewrites `MANIFEST.json`; `goldens_manifest.py --write` is the only thing that
+  can, because a silent re-bless would make the drift gate quiet exactly when it
+  matters. Note what that does *not* say: `make goldens` runs
+  `goldens_manifest.py --write` as its last step, so re-capturing by hand and
+  blessing the result is one command with no diff in between. Run
+  `goldens_manifest.py --check` first and read what moved — the gate is only
+  worth having if a change is looked at before it is recorded.
 
 ### The one deliberate divergence: the `ereport` shim
 
@@ -191,6 +218,14 @@ Three things keep that honest:
    before the check existed, `wrap_init` on a nonexistent namelist returned 0.
 3. **Every leaf driver must do the same.** Call `wrap_ereport_count()` after any
    call that could reach an error path and discard the result if it is non-zero.
+   `validation/capture_leaf.py` does this around every driver call, including
+   the ones that cannot currently reach `ereport` — the eight numerics leaves
+   reach `ukca_um_legacy_mod`'s six intrinsic wrappers and the `NINT` intrinsic
+   directly, and that module contains no `ereport` at all. Applying the rule
+   where it is not yet needed is the cheap half: the
+   first driver added for a routine that *can* ereport inherits the check
+   instead of inheriting its absence. It compares the counts either side of the
+   call and refuses to write the golden if any of the three moved.
 
 This is what unblocks issue #13 — `ukca_solvecoagnucl_v`'s error branch (code 4)
 calls `ereport`, so it cannot be swept without the shim.

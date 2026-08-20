@@ -23,14 +23,36 @@ Setups: 1, 2, 3, 4, 5, 6, 8. UKCA also defines 10, 11, 12 and 13, but
 instead — so they have no reference and cannot be captured. Note the
 consequence for mode coverage: slot 8, `mode_sup_insol`, is active only in
 setups 12 and 13, so it is off in every configuration this port can validate.
+
+**The capture is asserted to be real**, three ways, because the failure this
+repo has already shipped is a capture whose namelist edit no-op'd: every setup
+then holds the default configuration, and every byte-equality test passes
+against it. A bad golden must not be *written*, so all three checks run before
+`np.savez_compressed`, not in `pytest` afterwards:
+
+1. `render_namelist` asserts the match count of BOTH substitutions — the
+   `i_mode_setup` one as well as the switch injection — and then re-reads
+   `i_mode_setup` out of the text it produced;
+2. every subprocess reads `i_mode_setup` back out of the *Fortran*, through
+   `wrap_sizes`, and refuses to return a record for the wrong setup. That is
+   the one check a text bug cannot fool;
+3. `check_capture_varied` requires the captured records to differ where the
+   Fortran says they must: all 21 setup pairs differ (`component` differs for
+   every one of them, and four other fields for most), and the eight
+   switch combinations collapse to exactly seven distinct records per setup —
+   `bc_oob` is identical to `default` by construction, which is the point of
+   capturing it, and nothing else is.
 """
 
 from __future__ import annotations
 
 import argparse
+import itertools
 import json
+import re
 import subprocess
 import sys
+import tempfile
 import textwrap
 from pathlib import Path
 
@@ -113,38 +135,78 @@ def _switch_lines(overrides: dict) -> str:
     return "".join(f"\n  {k} = {v}" for k, v in values.items())
 
 
-def capture_one(setup: int, combo: str = "default") -> dict:
-    """Run one setup in its own process and return every table as lists."""
-    script = textwrap.dedent(f"""
+_SETUP_RE = re.compile(r"^(\s*i_mode_setup\s*=\s*)(\d+)", re.MULTILINE)
+# Anchored at both ends: `^(&box_aerosol)` alone also matches the opening of a
+# group merely named like it, and would inject five switches into the wrong one.
+_GROUP_RE = re.compile(r"^(&box_aerosol)[ \t]*$", re.MULTILINE)
+
+
+def render_namelist(text: str, setup: int, combo: str) -> str:
+    """The namelist for one (setup, combination), with every edit asserted.
+
+    Both substitutions, not one. The switch injection already counted its
+    matches; the `i_mode_setup` one did not, and that is precisely the edit
+    whose silent failure produced a golden holding the default configuration
+    seven times over, byte-equal and green.
+
+    Text rewriting only — no extension, no subprocess — so
+    `tests/test_capture_scripts.py` can exercise it directly, including the
+    no-op cases that must raise.
+    """
+    if combo not in COMBOS:
+        raise SystemExit(f"unknown switch combination {combo!r}")
+
+    found = _SETUP_RE.findall(text)
+    if len(found) != 1:
+        raise SystemExit(
+            f"expected exactly 1 i_mode_setup line in the namelist, found {len(found)} -- "
+            "count=1 would silently edit the first of them"
+        )
+
+    text, n = _SETUP_RE.subn(lambda m: m.group(1) + str(setup), text, count=1)
+    if n != 1:
+        raise SystemExit(f"failed to set i_mode_setup = {setup} in the namelist")
+
+    # Every switch is written explicitly into &box_aerosol, so the capture
+    # never depends on a namelist default that might change.
+    switches = _switch_lines(COMBOS[combo])
+    text, n = _GROUP_RE.subn(lambda m: m.group(1) + switches, text, count=1)
+    if n != 1:
+        raise SystemExit("failed to inject switches into &box_aerosol")
+
+    # The substitution counted its match; this checks what the match produced.
+    written = _SETUP_RE.findall(text)
+    if len(written) != 1 or int(written[0][1]) != setup:
+        raise SystemExit(f"rendered namelist reads i_mode_setup = {written}, wanted {setup}")
+    return text
+
+
+# The child, built once at import so `tests/test_capture_scripts.py` can compile
+# it without a built extension: a syntax error in here would otherwise surface
+# only during a capture, seven subprocesses deep.
+_CHILD = textwrap.dedent(f"""
         import json, sys
         sys.path.insert(0, {str(F2PY_DIR)!r})
         import glomap_f2py as g
 
-        # Any namelist works: the tables depend on i_mode_setup and the five
-        # switches, not on the meteorology, so the case is overridden below.
-        src = {str(NAMELISTS)!r} + '/boundary_layer.nml'
-        text = open(src).read()
-        import re, tempfile, pathlib
-        text = re.sub(r'^(\\s*i_mode_setup\\s*=\\s*)\\d+', r'\\g<1>{setup}',
-                      text, count=1, flags=re.MULTILINE)
-        # Every switch is written explicitly into &box_aerosol, so the capture
-        # never depends on a namelist default that might change.
-        switches = {_switch_lines(COMBOS[combo])!r}
-        text, n = re.subn(r'^(&box_aerosol)', lambda m: m.group(1) + switches,
-                          text, count=1, flags=re.MULTILINE)
-        assert n == 1, 'failed to inject switches into &box_aerosol'
-        d = pathlib.Path(tempfile.mkdtemp())
-        nml = d / 'setup.nml'
-        nml.write_text(text)
+        nml, setup = sys.argv[1], int(sys.argv[2])
 
-        ierr = g.wrap_init(str(nml))
+        ierr = g.wrap_init(nml)
         if ierr != 0:
-            print('@@FAIL@@' + json.dumps({{'setup': {setup}, 'ierr': int(ierr)}}))
+            print('@@FAIL@@' + json.dumps({{'setup': setup, 'ierr': int(ierr)}}))
             raise SystemExit(0)
 
-        nbox, nmodes, ncp = g.wrap_sizes()[:3]
-        out = {{'setup': {setup}, 'nmodes': int(nmodes), 'ncp': int(ncp)}}
-        out['topmode'] = int(g.wrap_topmode()[0])
+        sizes = g.wrap_sizes()
+        assert sizes[-1] == 0, ('wrap_sizes', sizes[-1])
+        nbox, nmodes, ncp, nchemg, nadvg, nbudaer, nsteps, i_mode_setup = sizes[:8]
+        # The Fortran's own opinion of which setup it is running. Every check on
+        # the namelist text is a check on the text; this is the one that fails
+        # if the text was fine and the setup still did not take.
+        assert int(i_mode_setup) == setup, ('wrong setup', int(i_mode_setup), setup)
+
+        out = {{'setup': setup, 'nmodes': int(nmodes), 'ncp': int(ncp)}}
+        topmode, e = g.wrap_topmode(); assert e == 0, ('topmode', e)
+        out['topmode'] = int(topmode)
 
         for f in {MODE_REAL!r}:
             v, e = g.wrap_mode_real(f, nmodes); assert e == 0, (f, e)
@@ -171,13 +233,107 @@ def capture_one(setup: int, combo: str = "default") -> dict:
 
         print('@@RESULT@@' + json.dumps(out))
     """)
-    proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+
+
+def capture_one(setup: int, combo: str = "default") -> dict:
+    """Run one setup in its own process and return every table as lists."""
+    # Any namelist works: the tables depend on i_mode_setup and the five
+    # switches, not on the meteorology, so the case is overridden here. Rendered
+    # in the parent rather than in the child so the edits are asserted by code
+    # that a test can call.
+    source = (NAMELISTS / "boundary_layer.nml").read_text()
+    with tempfile.TemporaryDirectory() as tmp:
+        nml = Path(tmp) / "setup.nml"
+        nml.write_text(render_namelist(source, setup, combo))
+        proc = subprocess.run(
+            [sys.executable, "-c", _CHILD, str(nml), str(setup)],
+            capture_output=True,
+            text=True,
+        )
+    label = f"setup {setup} ({combo})"
     if proc.returncode != 0:
-        raise SystemExit(f"setup {setup} failed:\n{proc.stdout}\n{proc.stderr}")
+        raise SystemExit(f"{label} failed:\n{proc.stdout}\n{proc.stderr}")
     if "@@FAIL@@" in proc.stdout:
         payload = json.loads(proc.stdout[proc.stdout.rindex("@@FAIL@@") + 8 :])
-        raise SystemExit(f"setup {setup}: wrap_init returned ierr={payload['ierr']}")
+        raise SystemExit(f"{label}: wrap_init returned ierr={payload['ierr']}")
+    if "@@RESULT@@" not in proc.stdout:
+        raise SystemExit(f"{label}: child produced no result:\n{proc.stdout}\n{proc.stderr}")
     return json.loads(proc.stdout[proc.stdout.rindex("@@RESULT@@") + 10 :])
+
+
+# The one pair of records in the whole matrix that is allowed to be identical.
+# `bc_oob` sets i_tune_bc to a value the SELECT CASE does not name, and that
+# CASE has no DEFAULT, so rhocomp(cp_bc) keeps the literal it already had --
+# which is what `default` produces as well. Capturing the fall-through is the
+# point of the combination; writing the collision down is what keeps the guard
+# below falsifiable instead of tuned to whatever came out.
+IDENTICAL_COMBOS = frozenset({frozenset({"default", "bc_oob"})})
+
+
+def _fingerprint(rec: dict) -> tuple:
+    """A hashable form of one captured record, ignoring the setup label itself."""
+
+    def freeze(value):
+        return tuple(freeze(v) for v in value) if isinstance(value, list) else value
+
+    return tuple((k, freeze(v)) for k, v in sorted(rec.items()) if k != "setup")
+
+
+def check_setups_differ(by_setup: dict[int, dict], combo: str = "default") -> None:
+    """Refuse a capture in which two setups produced the same tables.
+
+    All 21 pairs of the seven supported setups differ in the Fortran —
+    `component` in every pair, and `component_choice`, `mode`, `mode_choice`,
+    `fracbcem`, `fracocem` in most — so any collision means the capture did not
+    vary `i_mode_setup`, whatever the tables look like.
+    """
+    prints = {setup: _fingerprint(rec) for setup, rec in by_setup.items()}
+    same = [(a, b) for a, b in itertools.combinations(sorted(prints), 2) if prints[a] == prints[b]]
+    if same:
+        pairs = ", ".join(f"{a}=={b}" for a, b in same)
+        raise SystemExit(
+            f"combination {combo!r}: setups {pairs} captured identical tables -- "
+            "i_mode_setup did not vary, so the golden would hold one setup several "
+            "times over and every byte-equality test would pass against it"
+        )
+
+
+def check_combos_differ(by_combo: dict[str, dict], setup: int) -> None:
+    """Refuse a capture in which the switch combinations did not take effect.
+
+    Exactly one collision is expected and it is named in `IDENTICAL_COMBOS`;
+    an unexpected one means a switch never reached the Fortran, and a *missing*
+    one means the fall-through this capture exists to record has stopped
+    happening. Both are findings, so both raise.
+    """
+    missing = sorted(set(COMBOS) - set(by_combo))
+    if missing:
+        raise SystemExit(f"setup {setup}: no record for combination(s) {missing}")
+    prints = {combo: _fingerprint(rec) for combo, rec in by_combo.items()}
+    collided = {
+        frozenset({a, b})
+        for a, b in itertools.combinations(sorted(prints), 2)
+        if prints[a] == prints[b]
+    }
+    if collided != IDENTICAL_COMBOS:
+
+        def show(pairs):
+            return ", ".join("==".join(sorted(p)) for p in sorted(map(sorted, pairs))) or "none"
+
+        raise SystemExit(
+            f"setup {setup}: switch combinations collided as [{show(collided)}], "
+            f"expected exactly [{show(IDENTICAL_COMBOS)}] -- "
+            "an extra collision means a switch never reached the Fortran; a missing "
+            "one means the i_tune_bc fall-through changed"
+        )
+
+
+def check_capture_varied(records: dict[str, dict[int, dict]]) -> None:
+    """Every anti-collapse check, run before anything is written."""
+    for combo, by_setup in records.items():
+        check_setups_differ(by_setup, combo)
+    for setup in SETUPS:
+        check_combos_differ({c: recs[setup] for c, recs in records.items()}, setup)
 
 
 def _store(arrays: dict, setup: int, combo: str, rec: dict) -> None:
@@ -221,9 +377,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     arrays: dict[str, np.ndarray] = {}
+    records: dict[str, dict[int, dict]] = {}
     for combo in COMBOS:
+        records[combo] = {}
         for setup in SETUPS:
             rec = capture_one(setup, combo)
+            records[combo][setup] = rec
             if combo == "default":
                 print(
                     f"  setup {setup}: ncp={rec['ncp']} topmode={rec['topmode']} "
@@ -232,6 +391,14 @@ def main(argv: list[str] | None = None) -> int:
             _store(arrays, setup, combo, rec)
         if combo != "default":
             print(f"  {combo:<12} captured for {len(SETUPS)} setups")
+
+    # Before anything is written: a collapsed golden must not reach the disk,
+    # because once it is there every byte-equality test agrees with it.
+    check_capture_varied(records)
+    print(
+        f"  witness : {len(SETUPS)} setups pairwise distinct in every combination; "
+        f"{len(COMBOS) - len(IDENTICAL_COMBOS)} distinct combinations per setup"
+    )
 
     arrays["_case"] = np.array("modes")
     arrays["_mode"] = np.array("tables")
