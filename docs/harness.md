@@ -141,8 +141,9 @@ error to one call; gate A opens the call up.
 
 The committed `.npz` goldens: four cases × four streams in `f64`, plus the `f32`
 trajectory for the precision comparison, and the numerics leaf sweep.
-21 archives totalling 1.03 MB, guarded by a
-content manifest.
+Plus the phase C table captures: mode tables, gas and budget indices, and
+`coag_mode`. 25 archives totalling 1.6 MB, guarded by a content manifest that
+records the toolchain and refuses to regenerate itself without one.
 
 **Read the tolerance policy in `tests/conftest.py` before using this.** The
 headline number is that the primary gate is a *bounded* number of steps from a

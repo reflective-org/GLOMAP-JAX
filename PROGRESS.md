@@ -163,7 +163,7 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 
 All 18 tasks committed. Remaining before phase B closes: the adversarial review of the phase diff against the Fortran, with findings filed as issues.
 
-## Phase C — mode tables and indices: **7/10**
+## Phase C — mode tables and indices: **complete (10/10)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -174,6 +174,9 @@ All 18 tasks committed. Remaining before phase B closes: the adversarial review 
 | 28 | Setup 6 (dust-only) | this commit |
 | 29 | Setup 8 | `4bdd755` |
 | 30 | Density/hygroscopicity switches, both settings | this commit |
+| 31 | Gas-phase index tables | `bf7eb5c` |
+| 32 | Budget index map + ADR-008 | `bed9160` |
+| 33 | `coag_mode` table + mask carriers | `3c5aaf4` |
 
 **182/182 field comparisons byte-equal** across all seven setups —
 `array_equal`, not `allclose`.
@@ -197,6 +200,68 @@ byte equality and each now pinned as its own test:
 * `no_ions` needs **both** switches — `l_fix_nacl_density` only reaches it when
   `l_fix_ukca_hygroscopicities` is also on. Reading it as an independent knob
   selects the default branch and gets all seven setups wrong identically.
+
+Tasks 31–33 ran as three agents in separate git worktrees and merged with
+one-line conflicts in `Makefile`, `build_f2py.sh` and `test_goldens.py`. All
+three came back byte-equal on the first comparison. **1125 tests pass.**
+
+### The index tables are byte-equal, but two of them should not have been captured at all
+
+Two agents independently hit the same class of defect, now issue #19: **module
+integers that no dispatched routine ever assigns, read by live guards.**
+
+The 38 `nmas*mp*` budget indices are assigned only by
+`ukca_indices_sussbcocdump_8mode`, which the box dispatch at
+`glomap_box_config_mod.F90:371-390` never calls — while its *mode*-setup
+namesake `ukca_mode_sussbcocdump_8mode` **is** dispatched, which is what makes
+it easy to miss. 51 live `IF (nmas...mp... > 0)` sites read them. On the gas
+side, `budget`, `nbudget`, `traqu`, `ntraqu` come only from
+`ukca_indices_traqu38`/`traqu9`, called from nowhere, and `idustdep`,
+`ndustdep`, `nbudaertot` are assigned nowhere at all.
+
+gfortran zeroes `.bss`, so the guards are false and the code works. The
+standard promises nothing. **Task 31's acceptance criterion named `budget` as a
+table to capture** — doing so would have committed uninitialised memory as a
+reference golden, stable enough across runs to look correct.
+
+### What each table turned out to be
+
+* **Gas indices collapse to four routines, not seven** — 1→`sv1`, 2/3/8→
+  `orgv1_soto3`, 4/5→`orgv1_soto6`, 6→`nochem`. "The tables vary across setups"
+  is false, so a variation check written that way is vacuous; `soto3` and
+  `soto6` differ in exactly one number in the entire table. Also: `msotwo = 1`
+  in Fortran, so index **0** after conversion — carrying the `IF (mxxx > 0)`
+  idiom across silently drops SO2. And four live indices (`msec_orgi`, `mh2o2`,
+  `mhno3`, `mnh3`) are 0 in every supported setup, so the isoprene-SOA block,
+  `ukca_aero_step`'s `IF (mh2o2 > 0)` branch and both nitrate modules have **no
+  reference in any validatable configuration**.
+* **Budget indices**: seven setups, seven distinct `nbudaer` (8, 46, 89, 104,
+  107, 123, 138). All 344 `bud_aer_mas` write sites are guarded on their own
+  index, so slot 0 is a hole — asserted at source level, not just empirically,
+  because no golden reaches every site. **4 of the 344 overwrite rather than
+  accumulate**; routing those through an accumulate helper would turn a
+  per-step flux into a running total.
+* **`coag_mode` is setup-independent**, measured rather than grepped: read with
+  no init at all, then once per setup before and after `wrap_init`, all
+  byte-equal. It is also **symmetric on all 64 entries**, so a transposed
+  transcription would be byte-equal to the correct one — neither the source
+  parse nor the capture can catch it, and the `(imode, jmode)` order rests on
+  the call site's subscripts alone. Recorded in a test named for the gap.
+
+### ADR-008 — budget indices are traced
+
+Measured, not argued (CPU, float64, 344 sites, `nbudaer = 138`): static
+sequential 13.66 ms at `nbox = 1024` against traced sequential 0.38 ms; static
+grouped-and-stacked 0.145 ms against traced fused 0.371 ms. All four
+bit-identical, all four leave slot 0 zero. So static *is* faster — 2.6–3.7x —
+but only in the grouped form, which is exactly the form that needs the index
+map at trace time, i.e. the recompile-per-setup ADR-002 forbids. Seven static
+compilations cost 4.06 s; the gap is 0.23 ms/step on a diagnostic. Traced.
+
+The sentinel is `NOT_CARRIED = 0`, not `-1`: `.at[-1].add()` **wraps to the
+last element under every scatter mode** including `drop` and `clip`, so a `-1`
+sentinel would silently accumulate every uncarried flux into the highest budget
+slot. Out-of-range is the benign case; in-range-but-wrong is not.
 
 **Task 30** captures eight switch combinations per setup — 56 golden records —
 and every one is byte-equal. The switches split two ways, which is worth

@@ -38,12 +38,13 @@ float32 is permitted only as an explicitly labelled benchmark mode.
 setups have `ncp = 6`, so arrays are allocated at full extent and masked. What
 varies is `nchemg`, `nadvg` and `nbudaer`; those are padded to their maxima.
 
-**Open:** the 283 `nmas*` budget index scalars are per-setup integers. Either
-they are static config — which means recompiling per setup, contradicting the
-above — or they are traced, making every budget write a dynamic scatter.
-Recommendation is traced, since budgets are diagnostics and one kernel is worth
-more than a marginally faster scatter. To be settled with a measurement in
-phase C.
+**Settled in ADR-008: traced.** The 283 `nmas*` budget index scalars are
+per-setup integers, so they were either static config — recompiling per setup,
+contradicting the above — or traced, making every budget write a dynamic
+scatter. Measured in phase C. The recommendation above turned out to be right
+for the wrong reason: static is not slower, it is 2.6–3.7x *faster*, but only
+in the grouped-and-stacked form, which is precisely the form that needs the
+index map at trace time. See ADR-008 for the numbers.
 
 ## ADR-003 — `jax-metal` is out of scope
 
