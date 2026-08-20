@@ -1,4 +1,4 @@
-"""Task 25: `physics/modes.py` for `i_mode_setup = 1`, byte-equal.
+"""Tasks 25-29: `physics/modes.py` for every supported setup, byte-equal.
 
 **`array_equal`, not `allclose`.** These tables feed every process routine, so
 a diameter one ulp out is not a small error downstream — `drydp` is compared
@@ -59,36 +59,74 @@ def golden():
     return np.load(GOLDEN, allow_pickle=False)
 
 
+SETUPS = modes.supported_setups()
+
+
 @pytest.fixture(scope="module")
 def built():
     return modes.build(1)
 
 
+@pytest.mark.parametrize("setup", SETUPS)
 @pytest.mark.parametrize("field", ARRAY_FIELDS)
-def test_field_is_byte_equal_to_the_fortran(golden, built, field):
-    got = np.asarray(getattr(built, field))
+def test_field_is_byte_equal_to_the_fortran(golden, setup, field):
+    got = np.asarray(getattr(modes.build(setup), field))
     if got.dtype == bool:
         got = got.astype(np.int32)
-    np.testing.assert_array_equal(got, golden[f"s1_{field}"], err_msg=field)
+    np.testing.assert_array_equal(
+        got, golden[f"s{setup}_{field}"], err_msg=f"setup {setup}, {field}"
+    )
 
 
-def test_scalars_match(golden, built):
-    assert built.ncp == int(golden["s1_ncp"])
-    assert built.topmode == int(golden["s1_topmode"])
-    assert list(built.component_names) == list(golden["s1_component_names"])
+@pytest.mark.parametrize("setup", SETUPS)
+def test_scalars_match(golden, setup):
+    t = modes.build(setup)
+    assert t.ncp == int(golden[f"s{setup}_ncp"])
+    assert t.topmode == int(golden[f"s{setup}_topmode"])
+    assert list(t.component_names) == list(golden[f"s{setup}_component_names"])
 
 
-def test_every_captured_field_is_checked(golden):
+def test_every_supported_setup_is_ported(golden):
+    assert set(SETUPS) == set(int(s) for s in golden["_setups"])
+
+
+@pytest.mark.parametrize("setup", SETUPS)
+def test_every_captured_field_is_checked(golden, setup):
     """A field the golden carries and this file never compares is an untested
     part of the port that looks tested."""
-    captured = {k[3:] for k in golden if k.startswith("s1_")}
+    captured = {k.split("_", 1)[1] for k in golden if k.startswith(f"s{setup}_")}
     checked = set(ARRAY_FIELDS) | {"ncp", "topmode", "component_names", "nmodes"}
     assert captured - checked == set(), f"uncompared: {sorted(captured - checked)}"
 
 
-def test_unported_setups_raise_rather_than_return_wrong_tables(built):
-    with pytest.raises(NotImplementedError, match="not ported yet"):
-        modes.build(2)
+def test_unsupported_setups_raise_rather_than_return_wrong_tables():
+    """10-13 exist in UKCA but the box model rejects them, so there is no
+    reference. Returning plausible tables for one would be worse than failing."""
+    for setup in (7, 9, 10, 11, 12, 13):
+        with pytest.raises(NotImplementedError, match="not ported"):
+            modes.build(setup)
+
+
+def test_the_setups_are_not_all_the_same_tables():
+    """Every byte-equality test above would still pass if `build` ignored its
+    argument and the golden had been captured from one setup seven times."""
+    signatures = {s: modes.build(s).mode.tobytes() for s in SETUPS}
+    assert len(set(signatures.values())) >= 4
+
+
+def test_dust_only_setup_has_no_soluble_modes():
+    """Setup 6: condensation, nucleation and ageing are all structurally
+    no-ops, which is what makes it worth gating on."""
+    t = modes.build(6)
+    assert not t.mode[:4].any()
+    assert t.mode[modes.MODE_ACC_INSOL] and t.mode[modes.MODE_COR_INSOL]
+
+
+def test_mode_sup_insol_is_never_active():
+    """Slot 8 needs setup 12 or 13, neither of which the box model implements.
+    Any code path guarded on it has no reference in either setting of a
+    fidelity flag -- see UP-10."""
+    assert not any(modes.build(s).mode[modes.MODE_SUP_INSOL] for s in SETUPS)
 
 
 # --------------------------------------------------------------------------
@@ -96,6 +134,24 @@ def test_unported_setups_raise_rather_than_return_wrong_tables(built):
 # Each cost a debugging round; each is pinned so a "simplification" fails
 # with a reason rather than as an anonymous mismatch.
 # --------------------------------------------------------------------------
+
+
+def test_no_ions_needs_both_switches_not_either(golden):
+    """`:168-175` tests `l_fix_ukca_hygroscopicities .AND. l_fix_nacl_density`
+    first, so NaCl density only reaches `no_ions` when hygroscopicities is also
+    on — it is not an independent knob. Reading it as one selects the default
+    branch and gets every setup wrong in the same way, which is what happened."""
+    both = modes.build(1, l_fix_ukca_hygroscopicities=True, l_fix_nacl_density=True)
+    hygro = modes.build(1, l_fix_ukca_hygroscopicities=True, l_fix_nacl_density=False)
+    neither = modes.build(1, l_fix_ukca_hygroscopicities=False, l_fix_nacl_density=True)
+
+    np.testing.assert_array_equal(both.no_ions, golden["s1_no_ions"])
+    assert not np.array_equal(both.no_ions, hygro.no_ions)
+    # nacl_density alone must NOT move it -- that is the trap.
+    np.testing.assert_array_equal(
+        neither.no_ions,
+        modes.build(1, l_fix_ukca_hygroscopicities=False, l_fix_nacl_density=False).no_ions,
+    )
 
 
 def test_the_cube_must_be_repeated_multiplication_not_pow(golden):

@@ -34,6 +34,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from glomap_jax.core.constants import AVOGADRO, PI
+from glomap_jax.physics._mode_literals import SETUP_LITERALS
 
 NMODES = 8
 """`ukca_mode_setup.F90:68`. A PARAMETER, not a runtime value: the tables are
@@ -102,52 +103,13 @@ class ModeTables:
 
 
 # ---------------------------------------------------------------------------
-# Literals, transcribed from ukca_mode_setup.F90 with their line numbers.
+# Literals. Machine-extracted from ukca_mode_setup.F90, never retyped -- seven
+# setups times ten tables is several hundred numbers, and a single mistyped
+# digit in mfrac_0 or rhocomp produces tables that look plausible and a model
+# that is quietly wrong. See validation/extract_mode_literals.py.
 # ---------------------------------------------------------------------------
 
-_SUSS_4MODE = {
-    "ncp": 6,  # :46
-    "component_names": ("h2so4", "bcarbon", "ocarbon", "nacl", "dust", "sec_org"),  # :49-50
-    "mode_choice": [1, 1, 1, 1, 0, 0, 0, 0],  # :53
-    "component_choice": [1, 0, 0, 1, 0, 0],  # :56
-    "soluble_choice": [1, 0, 0, 1, 0, 0],  # :57
-    "component_mode": [  # :60-67, "allowed in <mode>"
-        [1, 0, 1, 0, 0, 1],
-        [1, 1, 1, 0, 0, 1],
-        [1, 1, 1, 1, 1, 1],
-        [1, 1, 1, 1, 1, 1],
-        [0, 1, 1, 0, 0, 0],
-        [0, 0, 0, 0, 1, 0],
-        [0, 0, 0, 0, 1, 0],
-        [0, 0, 0, 0, 1, 0],
-    ],
-    "ddplim0": [1.0e-9, 1.0e-8, 1.0e-7, 0.5e-6, 1.0e-8, 1.0e-7, 1.0e-6, 1.0e-6],  # :70-71
-    "ddplim1": [1.0e-8, 1.0e-7, 0.5e-6, 1.0e-5, 1.0e-7, 1.0e-6, 1.0e-5, 5.0e-5],  # :73-74
-    "sigmag": [1.59, 1.59, 1.40, 2.0, 1.59, 1.59, 2.0, 1.8],  # :77
-    "num_eps": [1.0e-8, 1.0e-8, 1.0e-8, 1.0e-14, 1.0e-8, 1.0e-14, 1.0e-14, 1.0e-20],  # :90-91
-    "mfrac_0": [  # :94-101
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-        [0.0, 0.5, 0.5, 0.0, 0.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-        [0.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-    ],
-    "mm": [0.098, 0.012, 0.0168, 0.05844, 0.100, 0.0168],  # :104
-    "rhocomp": [1769.0, 1500.0, 1500.0, 1600.0, 2650.0, 1500.0],  # :109-110
-    # no_ions is switch-dependent; see _no_ions below. :157-165
-    "no_ions": {
-        (True, True): [1.88, 0.0, 0.06, 2.23, 0.0, 0.06],
-        (True, False): [1.88, 0.0, 0.06, 3.04, 0.0, 0.06],
-        "default": [3.0, 0.0, 0.0, 2.0, 0.0, 0.0],
-    },
-    "fracbcem": [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # :167
-    "fracocem": [0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],  # :168
-}
-
-_SETUPS: dict[int, dict] = {1: _SUSS_4MODE}
+_SETUPS = SETUP_LITERALS
 
 
 def supported_setups() -> tuple[int, ...]:
@@ -296,13 +258,16 @@ def build(
     ddpmid = _ddpmid(ddplim0, ddplim1)
     mmid, mlo, mhi = _mode_masses(ddplim0, ddpmid, ddplim1, x, mfrac_0, rhocomp, mm, ncp)
 
-    key = (l_fix_ukca_hygroscopicities, l_fix_nacl_density)
-    no_ions = np.array(
-        lit["no_ions"].get(
-            key if l_fix_ukca_hygroscopicities else "default", lit["no_ions"]["default"]
-        ),
-        dtype=np.float64,
-    )
+    # :168-175. Three branches, in source order. Note the first tests BOTH
+    # switches, so l_fix_nacl_density only reaches no_ions when
+    # l_fix_ukca_hygroscopicities is also on -- it is not an independent knob.
+    if l_fix_ukca_hygroscopicities and l_fix_nacl_density:
+        branch = "both"
+    elif l_fix_ukca_hygroscopicities:
+        branch = "hygro_only"
+    else:
+        branch = "default"
+    no_ions = np.array(lit["no_ions"][branch], dtype=np.float64)
 
     return ModeTables(
         setup=setup,

@@ -163,7 +163,45 @@ Must complete before any physics commit. Tasks 11–23 plus 11b, 11c, 12b, 15b,
 
 All 18 tasks committed. Remaining before phase B closes: the adversarial review of the phase diff against the Fortran, with findings filed as issues.
 
-## Phases C–K — physics: not started (0/82)
+## Phase C — mode tables and indices: **6/10**
+
+| # | Task | Commit |
+|---|---|---|
+| 24 | Capture mode tables, all 7 setups | `6599091` |
+| 25 | Port `modes.py` for setup 1 | `6442f24` |
+| 26 | Setups 2, 3 | this commit |
+| 27 | Setups 4, 5 | this commit |
+| 28 | Setup 6 (dust-only) | this commit |
+| 29 | Setup 8 | this commit |
+
+**182/182 field comparisons byte-equal** across all seven setups —
+`array_equal`, not `allclose`.
+
+Literals are **machine-extracted** from `ukca_mode_setup.F90`, never retyped:
+seven setups times ten tables is several hundred numbers, and a mistyped digit
+gives plausible tables and a quietly wrong model. Same convention as
+`core/constants.py`. Everything derived is recomputed, which is what makes it a
+port rather than a copy.
+
+Four ways algebraically-identical code gave a different answer, each found by
+byte equality and each now pinned as its own test:
+
+* `d**3` vs `d*d*d` — gfortran expands an integer literal exponent to repeated
+  multiplication, numpy calls `pow()`. One ulp apart on two of eight modes.
+* Factor order in the mass products — factoring out the shared
+  `(pi/6)·(rhommav·avogadro)·x` reassociates and breaks all three.
+* Switch ordering — `rhocomp` is patched by `l_fix_nacl_density` *before* the
+  masses derive from it; applying it after leaves the coarse soluble mode 35%
+  out.
+* `no_ions` needs **both** switches — `l_fix_nacl_density` only reaches it when
+  `l_fix_ukca_hygroscopicities` is also on. Reading it as an independent knob
+  selects the default branch and gets all seven setups wrong identically.
+
+Remaining in phase C: 30 (density/hygroscopicity switches at both settings),
+31 (gas-phase indices), 32 (budget index map + the static-vs-traced ADR),
+33 (`coag_mode`).
+
+## Phases D–K — physics: not started
 
 ## Orders 2 and 3: not started
 
