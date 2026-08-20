@@ -72,6 +72,10 @@ def run_in_subprocess(body: str) -> dict:
 def test_the_extension_exposes_the_expected_entry_points():
     result = run_in_subprocess("result = sorted(n for n in dir(g) if n.startswith('wrap'))")
     assert result == [
+        "wrap_bud_count",
+        "wrap_bud_index",
+        "wrap_bud_names",
+        "wrap_bud_values",
         "wrap_component_names",
         "wrap_cp_int",
         "wrap_cp_real",
