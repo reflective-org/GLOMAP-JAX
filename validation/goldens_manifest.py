@@ -87,12 +87,24 @@ def describe(path: Path) -> dict:
     return {"content_sha256": content, "provenance": provenance, "arrays": arrays}
 
 
+def _display(path: Path) -> str:
+    """Repo-relative when it can be; absolute otherwise, so a monkeypatched
+    path in a test does not turn the error into a ValueError from pathlib."""
+    try:
+        return str(path.relative_to(REPO))
+    except ValueError:
+        return str(path)
+
+
 def read_toolchain() -> dict:
     """The toolchain block, copied into the manifest at generation time.
 
     `fortran/TOOLCHAIN.txt` is a build product and is gitignored, so without
     this the committed goldens would carry no record of what produced them --
     and goldens are not portable across compilers or platforms.
+
+    Absent it returns `{}`, which is correct for a tree that has never built
+    the reference. `write` is what refuses to act on that -- see there.
     """
     if not TOOLCHAIN.is_file():
         return {}
@@ -119,7 +131,26 @@ def load(manifest: Path = MANIFEST) -> dict:
 
 
 def write(goldens: Path = GOLDENS, manifest: Path = MANIFEST) -> dict:
+    """Regenerate the manifest, refusing to erase a provenance record.
+
+    `TOOLCHAIN.txt` is a gitignored build product, so `--write` in a tree where
+    `build_reference.sh` has not run used to replace a populated toolchain
+    block with an empty one: no error, no warning, and the record of what
+    compiled every archive gone, inside a diff that otherwise looks like a
+    routine regeneration. The route in is ordinary -- capture one new golden
+    from a pre-built extension and refresh the manifest.
+
+    Writing an empty block over an empty one is fine, which is what a fresh
+    clone and CI do.
+    """
     data = build(goldens)
+    if not data["toolchain"] and load(manifest).get("toolchain"):
+        raise SystemExit(
+            f"refusing to write {manifest.name}: it records a toolchain and "
+            f"{_display(TOOLCHAIN)} is missing,\n"
+            "so this would silently drop the provenance of every golden.\n"
+            "Run ./validation/build_reference.sh first."
+        )
     goldens.mkdir(parents=True, exist_ok=True)
     manifest.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return data

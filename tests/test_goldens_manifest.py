@@ -205,6 +205,37 @@ def test_the_manifest_records_the_toolchain_that_built_the_reference(goldens):
     assert "-ffp-contract=off" in data["toolchain"]["flags"]
 
 
+def test_regenerating_without_a_toolchain_refuses_rather_than_blanking_it(goldens, monkeypatch):
+    """The failure this replaces was silent, which is why it needs its own test.
+
+    `TOOLCHAIN.txt` is a gitignored build product. Regenerating the manifest in
+    a tree that has not built the reference — capture one new golden from an
+    already-built extension, refresh the manifest — used to overwrite a
+    populated toolchain block with `{}`. No error, and a diff that reads as a
+    routine regeneration. Found while porting `coag_mode`, where only the
+    assertion above caught it.
+    """
+    manifest = goldens / "MANIFEST.json"
+    make_archive(goldens / "a.npz")
+    monkeypatch.setattr(gm, "TOOLCHAIN", goldens / "present.txt")
+    gm.TOOLCHAIN.write_text("gfortran: 14.2.0\nflags: -ffp-contract=off\n", encoding="utf-8")
+    assert gm.write(goldens, manifest)["toolchain"]
+
+    monkeypatch.setattr(gm, "TOOLCHAIN", goldens / "absent.txt")
+    with pytest.raises(SystemExit, match="provenance"):
+        gm.write(goldens, manifest)
+    # And the block on disk is still there, not half-written.
+    assert json.loads(manifest.read_text())["toolchain"]["gfortran"] == "14.2.0"
+
+
+def test_regenerating_an_empty_toolchain_over_an_empty_one_is_allowed(goldens, monkeypatch):
+    """A fresh clone and CI have no reference build, and must still be able to
+    regenerate. The refusal is about losing a record, not about lacking one."""
+    monkeypatch.setattr(gm, "TOOLCHAIN", goldens / "absent.txt")
+    make_archive(goldens / "a.npz")
+    assert gm.write(goldens, goldens / "MANIFEST.json")["toolchain"] == {}
+
+
 def test_the_manifest_is_stable_across_regeneration(goldens):
     """Otherwise every regeneration produces a diff and the gate becomes noise."""
     make_archive(goldens / "a.npz")
