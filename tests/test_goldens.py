@@ -39,6 +39,7 @@ LEAF_ARCHIVES = {
     "numerics.f64.leaf.npz",
     "modes.f64.tables.npz",
     "gasidx.f64.tables.npz",
+    "budidx.f64.tables.npz",
     "coagmode.f64.tables.npz",
 }
 

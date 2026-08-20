@@ -56,6 +56,7 @@ goldens:
 	$(PY) validation/capture_leaf.py
 	$(PY) validation/capture_modes.py
 	$(PY) validation/capture_gas_indices.py
+	$(PY) validation/capture_budget_indices.py
 	$(PY) validation/capture_coag_mode.py
 	$(PY) validation/goldens_manifest.py --write
 

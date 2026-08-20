@@ -136,3 +136,90 @@ Both are asserted in `tests/test_goldens_manifest.py`, so the decision is
 re-opened by a failing test rather than by someone noticing. The likely trigger
 is not more namelists — it is capturing a multi-box case, where every stream
 scales with `nbox`.
+
+## ADR-008 — budget indices are traced data, not static config
+
+**Decided.** The 283 `nmas*` slot indices are carried as an `int32` array and
+every budget write is a masked scatter into a fixed-width array. They are not
+Python integers baked into the trace. This settles the "Open" item in ADR-002.
+
+The port's map is `physics/budget_indices.py`, machine-extracted from
+`ukca_setup_indices.F90` and byte-compared against
+`tests/goldens/budidx.f64.tables.npz`, which was read out of the compiled
+Fortran one subprocess per setup.
+
+**What is actually being decided.** `bud_aer_mas(nbox, 0:nbudaer)` is written
+at 344 sites across 13 source files. (684 is the count of `bud_aer_mas(...)`
+index expressions in executable code — 344 on the left of an assignment and 340
+reading the slot back to accumulate into it — which is what
+`test_budget_slot_zero_is_never_written` calls "~684 writes".) Each site names
+one of the 283 scalars, whose value is a
+function of `i_mode_setup`. Static means seven traces of every process routine
+that touches a budget; traced means one, with the map as an argument.
+
+Measured on this machine (CPU, float64, `nbudaer = 138`, all 344 sites, 20-50
+reps after a warm-up call):
+
+| form | nbox=1 | nbox=1024 | nbox=16384 | compile (nbox=1024) |
+|---|---|---|---|---|
+| static, 344 sequential `.at[int].add` | 0.122 ms | 13.66 ms | — | 0.61 s |
+| traced, 344 sequential `.at[idx].add` | 0.098 ms | 0.38 ms | — | 1.08 s |
+| static, grouped by slot + one stack | 0.040 ms | 0.145 ms | 1.88 ms | 0.73 s |
+| traced, one fused scatter | 0.006 ms | 0.371 ms | 6.92 ms | 0.02 s |
+
+All four agree **bit for bit**, and all four leave slot 0 exactly zero.
+Under `vmap` over 1024 boxes the same split holds: 15.99 ms static against
+0.49 ms traced for the sequential form. Seven static compilations cost 4.06 s.
+
+Three things that table says, none of them the one the plan assumed:
+
+* **"Static is marginally faster" is not what was measured.** In the form a
+  port would naturally write — one guarded update per site, mirroring the
+  Fortran — traced is **36× faster** at nbox=1024. Why is not established:
+  both forms lower to 344 scatters, and the plausible explanation is that XLA
+  fuses the dynamic ones better, but that is a hypothesis and not a
+  measurement.
+* **Static wins only in its best form**, grouping the 344 deltas by slot and
+  building the column stack in one go: 2.6× at nbox=1024 and 3.7× at
+  nbox=16384 over the fused traced scatter. That form needs the map at trace
+  time, so it is exactly the form that costs a recompile per setup.
+* **The absolute numbers are small and this is a diagnostic.** The gap between
+  the best static and the best traced form is 0.23 ms per step at nbox=1024.
+
+**What could not be measured, and is not claimed.** No process routine is
+ported yet, so the budget scatter cannot be quoted as a *fraction* of a step.
+Everything above is CPU; XLA's scatter on CUDA is a different implementation
+and this has to be re-measured there.
+
+**The sentinel, which is not a performance question.** The Fortran dimension is
+`0:nbudaer`, so the slot number and the 0-based column index are the same
+integer and no rebasing is needed. That matters because the alternatives are
+unsafe rather than merely awkward: `jnp.zeros(5).at[-1].add(1.0)` **wraps to
+the last element**, so a −1 sentinel would silently accumulate every uncarried
+flux into the highest budget slot. Measured, that wrap happens under *every*
+scatter mode — `drop`, `clip` and the default `promise_in_bounds` alike — so it
+is not something a mode flag fixes; an out-of-*range* index is the benign
+case, dropped by default and only clamped into a real slot under `clip`.
+`NOT_CARRIED = 0` keeps the sentinel inside the array, pointed at the one
+column the reference never writes, and the mask does the rest: uncarried sites
+scatter a bit-exact `0.0` into slot 0. Masked with
+`jnp.where`, never `mask * delta` — an uncarried delta is exactly where an
+`inf` can sit, and `0.0 * inf` is `NaN`.
+
+**A defect this forced into the open.** Each `ukca_indices_*` routine assigns
+245 of the 283 scalars. The other 38 are the `nmas*mp*` family, assigned only
+by `ukca_indices_sussbcocdump_8mode`, which no supported setup dispatches to —
+so in all seven they are **read without ever having been assigned**, 34 of them
+from a live `IF (nmasxxx > 0)` guard. Module scalars have static storage, so
+gfortran hands back a `.bss` zero and the guard is false; the standard promises
+nothing. The capture measured 0 for all 38 in all seven setups, and the port
+defines them as 0 explicitly rather than inheriting the compiler's answer.
+
+**Would change this:** a measurement showing the budget scatter above ~5% of a
+step at the `nbox` the port actually runs, once there is a step to measure it
+against; or a CUDA measurement where the fused scatter is more than ~5× the
+grouped-static form. Either would justify a per-setup specialisation of the
+budget writes *only* — the process routines would stay shared, because 7×
+recompiling those for a diagnostic is what this ADR is refusing. A run pinned
+to a single setup can already take the grouped form without changing anything
+here, since the map is available at trace time whenever the caller wants it.
