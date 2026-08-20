@@ -12,9 +12,9 @@ against the committed golden. 15,382 points.
 ===============  ===================================  =========================
 primitive        JAX vs gfortran                      verdict
 ===============  ===================================  =========================
-``erf``          bit-identical, 4330/4330             use ``jax.scipy`` directly
+``erf``          bit-identical, 4330/4330 (arm64)     use ``jax.scipy`` directly
 ``log``, ``1/x`` bit-identical                        use them directly
-``x**(1/3)``     bit-identical, 1865/1865             **this** is ``cubrt_v``
+``x**(1/3)``     bit-identical, 1865/1865 (arm64)     **this** is ``cubrt_v``
 ``exp``          456/3199 differ, max 2.1e-16         1 ulp; inside tolerance
 ``jnp.cbrt``     1756/1865 differ, max 1.3e-14        **do not use** by default
 ``jnp.round``    64 of 129 ties differ                **do not use**
@@ -38,6 +38,13 @@ because ``ukca_vapour.F90:226`` computes ``(NINT(wts/5))*5`` and uses the result
 to **index a lookup table** — at ``wts`` in {42.5, 52.5, 62.5, 72.5, 82.5,
 92.5} the naive version selects a different table entry, not a slightly
 different number.
+
+All of that was measured on Darwin arm64. On x86_64 the same JAX differs from
+the same gfortran build by up to 2 ulp on ``erf`` (35% of the grid) and 1 ulp
+on the powers, while ``log``, ``1/x`` and the rounding helpers stay exact. Bit
+identity here is a property of the platform pair, not of these functions --
+``tests/conftest.py:assert_matches_reference`` and the ``linux-reference`` CI
+job are what keep that honest. See docs/porting-notes.md.
 
 One hazard with no shim, because none is possible: XLA flushes the *result of
 any arithmetic operation* to zero when it would be subnormal, and gfortran does

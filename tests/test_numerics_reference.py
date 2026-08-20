@@ -32,7 +32,7 @@ import jax.numpy as jnp
 import numpy as np
 import pytest
 
-from conftest import RTOL_TRANSCENDENTAL
+from conftest import RTOL_TRANSCENDENTAL, assert_matches_reference
 
 GOLDEN = Path(__file__).parent / "goldens" / "numerics.f64.leaf.npz"
 
@@ -118,7 +118,7 @@ def test_jax_erf_is_bit_identical_to_gfortran(sweep):
     `newn > num_eps`, which needs `nd` within a factor of two of 1e-20 to
     matter. The branch risk the plan attributed here belongs to `cubrt_v`."""
     got = np.asarray(jax.scipy.special.erf(jnp.asarray(sweep["erf_x"])))
-    np.testing.assert_array_equal(got, sweep["erf_y"])
+    assert_matches_reference(got, sweep["erf_y"], "jax erf vs gfortran ERF")
 
 
 def test_jax_log_and_reciprocal_are_bit_identical_to_gfortran(sweep):
@@ -156,7 +156,9 @@ def test_cbrt_must_be_written_as_x_to_the_one_third(sweep):
     feeds `ukca_remode`'s merge threshold and `ukca_calc_drydiam`'s undersize
     reset, that is a branch-flipping difference and not a cosmetic one."""
     x = sweep["cubrt_x"]
-    np.testing.assert_array_equal(np.asarray(jnp.asarray(x) ** (1.0 / 3.0)), sweep["cubrt_y"])
+    assert_matches_reference(
+        np.asarray(jnp.asarray(x) ** (1.0 / 3.0)), sweep["cubrt_y"], "x ** (1.0/3.0)"
+    )
     assert not np.array_equal(np.cbrt(x), sweep["cubrt_y"]), (
         "np.cbrt now agrees with x**(1/3); re-measure before relaxing the rule"
     )
@@ -224,7 +226,7 @@ def test_powr_v_takes_a_scalar_exponent(sweep):
         # Subnormal results are excluded and tested separately below: JAX
         # flushes them to zero and gfortran does not.
         normal = np.abs(y[i]) >= tiny
-        np.testing.assert_array_equal(got[normal], y[i][normal])
+        assert_matches_reference(got[normal], y[i][normal], f"x ** {p}")
 
 
 def test_jax_flushes_subnormal_results_to_zero_and_gfortran_does_not(sweep):

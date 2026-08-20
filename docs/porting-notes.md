@@ -145,9 +145,9 @@ Results against JAX on the CPU backend, float64:
 
 | primitive | agreement | verdict |
 |---|---|---|
-| `erf` (via `umErf`) | **bit-identical**, 4330/4330 | no shim needed |
+| `erf` (via `umErf`) | **bit-identical**, 4330/4330 (arm64) | no shim needed |
 | `log`, `1/x` | bit-identical | safe |
-| `x ** (1.0/3.0)` | bit-identical | **this** is what `cubrt_v` computes |
+| `x ** (1.0/3.0)` | bit-identical (arm64) | **this** is what `cubrt_v` computes |
 | `exp` | 456/3199 differ, max 2.1e-16 | one ulp; inside tolerance but real |
 | `np.cbrt` | 1756/1865 differ, max 1.3e-14 | **must not be used** |
 | `NINT` vs `round` | 64/642 differ | **must not use `jnp.round`** |
@@ -281,6 +281,51 @@ mentioning alongside it if that is ever filed upstream.
 
 `i_tune_bc` is also inert unless `l_radaer` is on, which the box model defaults
 off, so BC density tuning is unreachable in the default configuration.
+
+## Bit-identity is a property of a platform pair, not of the port
+
+The measurements above were all taken on one machine — gfortran 16.1.0 on
+Darwin arm64 — and written up as though they were properties of `erf` and
+`**`. They are not. Ubuntu x86_64 CI, running the same tests against the same
+committed goldens, disagrees:
+
+| primitive | points differing | max relative |
+|---|---|---|
+| `erf` | 1521 / 4330 (35%) | 4.5e-16 (2 ulp) |
+| `x ** (1.0/3.0)` | 86 / 1865 (4.6%) | 2.2e-16 (1 ulp) |
+| `x ** p` (`powr_v`) | 1 / 1865 | 1.9e-16 |
+| `log`, `1/x`, `nint`, `vapour_round` | 0 | — |
+
+Everything that differs is a libm transcendental; everything exact stays exact
+everywhere, which is the expected shape and a useful check that the failures
+are what they look like.
+
+**The CI job that found this could not have interpreted it.** The `test` job
+installs no gfortran — deliberately, so the pure-Python port stays verifiable
+without a Fortran toolchain — so it was comparing *this* platform's JAX against
+*another* platform's Fortran. That is not a comparison between the port and the
+reference; it is a comparison between two machines. `goldens_manifest.py` has
+said "goldens are NOT portable across compilers or platforms" in its docstring
+since it was written, and `build_reference.sh` has recorded `uname -srm` in
+`TOOLCHAIN.txt` all along. Nothing read either.
+
+Two changes. `tests/conftest.py:assert_matches_reference` requires bit equality
+when the running platform matches the `uname` the manifest recorded, and a
+bounded 2 ulp otherwise, naming both platforms when it fails — the relaxed
+window still catches every structural porting error, which are orders of
+magnitude out rather than two ulp. Quantities that are integer-valued off a
+comparison (`nint`, `vapour_round`) stay exact everywhere, because there is no
+rounding for a platform to disagree about. And the `linux-reference` CI job
+builds gfortran on x86_64, re-captures the sweep there, re-stamps the manifest
+so the strict path is selected, and then demands bit equality — so the strong
+claim is re-established per platform instead of assumed to travel.
+
+What this means for order 1: **byte-equal trajectories are achievable against a
+reference built on the same machine, and are not a cross-platform property of
+this port.** Any gate that compares against a committed golden inherits the
+capture platform. Worth knowing before phase I, where the trajectory goldens
+start branching on computed floats — a 2 ulp difference in `drydp` is normally
+2 ulp in the answer, but at a merge threshold it is a different mode structure.
 
 ## Setup coverage of the shipped namelists
 

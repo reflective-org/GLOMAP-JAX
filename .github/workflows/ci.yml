@@ -57,6 +57,50 @@ jobs:
       - run: pip install -e ".[test]"
       - run: pytest -q -m "not slow"
 
+  # The leaf sweeps assert that JAX reproduces gfortran bit for bit. That claim
+  # was only ever measured on the machine that captured the goldens (Darwin
+  # arm64), and on x86_64 the committed goldens disagree with JAX by up to 2
+  # ulp -- which the `test` job cannot interpret, because it has no gfortran and
+  # so cannot tell a porting error from a platform difference.
+  #
+  # This job builds the reference on x86_64 and re-captures the sweep there, so
+  # both sides come from the same machine and bit equality is a fair question
+  # again. It deliberately overwrites the committed golden and then throws the
+  # tree away; nothing here is blessed as a fixture.
+  linux-reference:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: sudo apt-get update && sudo apt-get install -y gfortran
+      - run: pip install -e ".[test]" meson ninja
+      - run: ./validation/build_reference.sh f64
+      - run: ./validation/build_f2py.sh
+      - name: Re-capture the leaf sweep on this platform
+        run: python validation/capture_leaf.py
+      - name: Show how far this platform's Fortran is from the committed golden
+        run: git diff --stat tests/goldens/numerics.f64.leaf.npz
+      # Without this the manifest still names Darwin arm64, the comparison
+      # takes its relaxed cross-platform path, and the job silently stops
+      # asserting the thing it exists to assert.
+      - name: Re-stamp the manifest so the strict comparison is selected
+        run: |
+          python validation/goldens_manifest.py --write
+          python - <<'EOF'
+          import sys
+          sys.path.insert(0, "tests")
+          import conftest
+          assert conftest.on_capture_platform(), (
+              f"expected the strict path here; manifest says "
+              f"{conftest.capture_platform()!r}"
+          )
+          print("strict comparison selected:", conftest.capture_platform())
+          EOF
+      - name: JAX here must match gfortran here, bit for bit
+        run: pytest -q tests/test_numerics.py tests/test_numerics_reference.py
+
   soak:
     # Long-running trajectory and convergence tests. Scheduled/manual only.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'

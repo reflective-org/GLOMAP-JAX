@@ -19,7 +19,7 @@ import jax
 import numpy as np
 import pytest
 
-from conftest import RTOL_TRANSCENDENTAL
+from conftest import CROSS_PLATFORM_ULP, RTOL_TRANSCENDENTAL, assert_matches_reference
 from glomap_jax.config import FidelityConfig
 from glomap_jax.core import numerics
 
@@ -44,9 +44,17 @@ def sweep():
 def test_matches_the_fortran_bit_for_bit(sweep, fn, key):
     """Bit-identical, not `allclose`. These are the primitives every later phase
     is built on; a one-ulp drift here becomes a flipped branch downstream, and
-    accepting it now would make every subsequent tolerance meaningless."""
+    accepting it now would make every subsequent tolerance meaningless.
+
+    `nint` and `vapour_round` are held exact on every platform: they are integer
+    results off a comparison, with no rounding to disagree about. `erf` and
+    `cbrt` are held exact only where the goldens were captured -- see
+    `assert_matches_reference`, and the `linux-reference` CI job that
+    re-establishes the strong claim on x86_64 by building gfortran there.
+    """
     got = np.asarray(getattr(numerics, fn)(sweep[f"{key}_x"]))
-    np.testing.assert_array_equal(got, sweep[f"{key}_y"])
+    exact_everywhere = 0 if fn in ("nint", "vapour_round") else CROSS_PLATFORM_ULP
+    assert_matches_reference(got, sweep[f"{key}_y"], f"{fn} vs {key}", ulp=exact_everywhere)
 
 
 def test_nint_survives_the_double_just_below_a_half(sweep):
@@ -81,7 +89,7 @@ def test_cbrt_exact_is_a_different_function_and_is_not_the_default(sweep):
     assert FidelityConfig().cbrt_exact is False
 
     faithful = np.asarray(numerics.cbrt(sweep["cubrt_x"], exact=False))
-    np.testing.assert_array_equal(faithful, sweep["cubrt_y"])
+    assert_matches_reference(faithful, sweep["cubrt_y"], "cbrt(exact=False)")
 
 
 def test_how_far_jnp_cbrt_is_from_the_faithful_form_on_this_jax(sweep):

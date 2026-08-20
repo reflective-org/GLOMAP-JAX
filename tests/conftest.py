@@ -23,6 +23,10 @@ what the branch-agreement gate (Gate 0) is for, and why it is the highest-value
 check in the suite rather than a nicety.
 """
 
+import json
+import platform
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -86,6 +90,94 @@ def max_rel_err(actual, expected, abs_floor=0.0):
 
 @pytest.fixture(scope="session")
 def goldens_dir():
-    from pathlib import Path
-
     return Path(__file__).parent / "goldens"
+
+
+# --- Reference bit-equality, and where it stops being a property of the port ---
+#
+# The leaf sweeps assert that a JAX primitive reproduces gfortran's result bit
+# for bit. That is true, and it is what lets later phases gate on byte equality
+# rather than tolerance -- but it is a property of a *platform pair*, not of the
+# port, and the project only ever measured it on one.
+#
+# CI proved the point: on ubuntu x86_64 the committed goldens, captured with
+# gfortran on Darwin arm64, disagree with JAX by up to 2 ulp -- `erf` on 35% of
+# its grid, `x**(1.0/3.0)` on 4.6% of its. The same tests are green on macOS.
+# The job that failed has no gfortran, so it could not have re-derived the
+# reference; it was comparing this platform's JAX against another platform's
+# Fortran, which the manifest's own docstring already says is not a valid
+# comparison. Nothing acted on that until now.
+#
+# So: bit equality is required where the goldens were captured, and a bounded
+# ulp gap is asserted everywhere else. The bound still catches a real porting
+# error -- anything structural is orders of magnitude out, not two ulp. The
+# strong claim is re-established per platform by the `linux-reference` CI job,
+# which builds gfortran there and re-captures before comparing.
+
+CROSS_PLATFORM_ULP = 2
+
+_MANIFEST = Path(__file__).parent / "goldens" / "MANIFEST.json"
+
+
+def capture_platform() -> str | None:
+    """`uname -srm` of the machine that compiled the reference, or None.
+
+    Recorded by `validation/build_reference.sh` into `fortran/TOOLCHAIN.txt` and
+    copied into the manifest at capture time.
+    """
+    if not _MANIFEST.is_file():
+        return None
+    return json.loads(_MANIFEST.read_text(encoding="utf-8")).get("toolchain", {}).get("uname")
+
+
+def on_capture_platform() -> bool:
+    """Whether bit equality with the committed goldens is a fair thing to ask.
+
+    Compares OS and machine, deliberately not the kernel version: a point
+    release does not change libm or XLA lowering, and requiring an exact match
+    would downgrade every developer's gate the next time they update.
+    """
+    recorded = capture_platform()
+    if not recorded:
+        return False
+    fields = recorded.split()
+    return len(fields) == 3 and fields[0] == platform.system() and fields[2] == platform.machine()
+
+
+def _ulp_window(expected, n):
+    lo = hi = np.asarray(expected, dtype=np.float64)
+    for _ in range(n):
+        lo = np.nextafter(lo, -np.inf)
+        hi = np.nextafter(hi, np.inf)
+    return lo, hi
+
+
+def assert_matches_reference(actual, expected, what, ulp=CROSS_PLATFORM_ULP):
+    """Bit-identical on the capture platform; within `ulp` elsewhere.
+
+    Pass `ulp=0` for a quantity that must be exact on every platform -- integer
+    results, `NINT`, table lookups. Those have no rounding to disagree about,
+    and letting them drift would hide a real bug.
+    """
+    actual = np.asarray(actual, dtype=np.float64)
+    expected = np.asarray(expected, dtype=np.float64)
+    if ulp == 0 or on_capture_platform():
+        np.testing.assert_array_equal(actual, expected, err_msg=what)
+        return
+
+    both_nan = np.isnan(actual) & np.isnan(expected)
+    lo, hi = _ulp_window(expected, ulp)
+    within = ((actual >= lo) & (actual <= hi)) | both_nan
+    if within.all():
+        return
+
+    off = ~within
+    raise AssertionError(
+        f"{what}: {off.sum()} of {off.size} points differ from the reference by "
+        f"more than {ulp} ulp.\nThe goldens were captured on "
+        f"{capture_platform()!r} and this is "
+        f"{platform.system()} {platform.machine()}, so a small gap is expected "
+        f"and a large one is a porting error.\n"
+        f"max relative difference among violations: "
+        f"{np.max(np.abs((actual[off] - expected[off]) / expected[off])):.3e}"
+    )
