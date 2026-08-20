@@ -33,3 +33,7 @@ validation/f2py/_build/
 fort.[0-9]*
 fortran/TOOLCHAIN.txt
 .refstage/
+
+# Agent worktrees and machine-local Claude Code state live here.
+.claude/worktrees/
+.claude/settings.local.json
