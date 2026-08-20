@@ -240,12 +240,19 @@ def test_nint_away_from_ties_is_unambiguous(sweep):
 def test_the_vapour_lookup_index_is_wrong_under_round_half_to_even(sweep):
     """The live consumer: `ukca_vapour.F90:226` computes `(NINT(wts/5))*5` and
     uses the result to index a table, so a tie that rounds the other way
-    selects a different table entry — not a slightly different number."""
+    selects a different table entry — not a slightly different number.
+
+    The ties are the odd multiples of 2.5: there, `wts/5` lands on `k + 0.5`
+    with `k` even, and rounding half to even keeps `k` while Fortran goes to
+    `k + 1`. 102.5 is in the set because the grid runs to 110 — `wts` is capped
+    at 99 only in the `l_fix_neg_pvol_wat` arm, and the default arm reaches
+    103.8. Its `round` of 105 misses `percent` (which stops at 95) either way,
+    so that particular tie is inert; the six below 100 are not.
+    """
     x, expected = sweep["vapour_round_x"], sweep["vapour_round_y"]
     naive = np.round(x / 5) * 5
     mismatched = naive != expected
-    assert mismatched.sum() == 6
-    assert set(x[mismatched]) == {42.5, 52.5, 62.5, 72.5, 82.5, 92.5}
+    assert set(x[mismatched]) == {42.5, 52.5, 62.5, 72.5, 82.5, 92.5, 102.5}
 
 
 def test_powr_v_takes_a_scalar_exponent(sweep):

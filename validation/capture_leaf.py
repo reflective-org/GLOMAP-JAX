@@ -200,10 +200,13 @@ def grids() -> dict[str, np.ndarray]:
                 ]
             )
         ),
-        # ukca_vapour clamps wts to [41, 99] before dividing by 5, so this is
-        # the full reachable domain of that lookup, at a step fine enough to
-        # straddle every tie.
-        "vapour_round": np.unique(np.arange(40.0, 100.0 + 0.125, 0.125)),
+        # Only the l_fix_neg_pvol_wat arm caps wts at 99 (ukca_vapour.F90:184);
+        # the default arm is MAX(41.0, ws*100) with no ceiling (:188) and
+        # reaches 103.8. The grid runs past 99 for that reason. What it is
+        # really pinning is the tie behaviour of (NINT(wts/5))*5, whose result
+        # is matched against `percent` (:90), which stops at 95 -- so every
+        # round >= 100 falls through to rhosol_strat = 1300.0.
+        "vapour_round": np.unique(np.arange(40.0, 110.0 + 0.125, 0.125)),
     }
 
 

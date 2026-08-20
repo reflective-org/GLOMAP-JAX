@@ -357,6 +357,68 @@ capture platform. Worth knowing before phase I, where the trajectory goldens
 start branching on computed floats — a 2 ulp difference in `drydp` is normally
 2 ulp in the answer, but at a merge threshold it is a different mode structure.
 
+## `jit` is not byte-equal, and the cost has a number now
+
+XLA-CPU contracts `a*b + c` into a true FMA — one rounding where the reference
+does two, since every reference variant is built `-ffp-contract=off`
+(`build_reference.sh:37`, `build_f2py.sh:42`). Eager JAX does not contract.
+
+Measured on this arm64 build with jax 0.11.0: **23.4% of 200,000 random triples
+differ**, and every differing jitted value is the correctly-rounded FMA,
+checked exactly with `Fraction`. So this is contraction, not fast-math
+reassociation — which matters, because reassociation would be far harder to
+reason about.
+
+On the ZSR polynomials `ukca_water_content_v` evaluates over the box-live range
+(`aw = max(rh, rh_min/100)`, `rh` in [0.1, 0.9]):
+
+| pair | points differing | max relative |
+|---|---|---|
+| (1,−2) H₂SO₄ | 179,687 / 200,001 | 4.2e-13 |
+| (1,−4) HCl | 153,315 / 200,001 | 8.6e-14 |
+| (3,−2) | 122,371 / 200,001 | 2.4e-14 |
+| **(3,−4)** | 105,907 / 200,001 | **4.8e-11** |
+
+`RTOL_JIT_VS_EAGER = 1e-14`. Water content under `jit` misses it by three
+orders. That constant was a plausible tightness rather than a measurement, and
+it cannot be met for anything FMA-shaped.
+
+Ineffective: `--xla_cpu_enable_fast_math=false`,
+`--xla_allow_excess_precision=false`, `lax.optimization_barrier` on the
+product, a `bitcast_convert_type` round trip. Contraction looks unconditional
+in XLA's CPU lowering.
+
+Nothing in order 1 changes — `CLAUDE.md` already requires porting eager first
+and keeping the eager driver permanently, and every byte-equality gate runs
+eager. What changes is that order 2 cannot claim jit parity with the goldens
+without settling this. Issue #23, pinned by
+`test_xla_contracts_multiply_add_under_jit_and_gfortran_does_not`.
+
+## Two spellings of `sixovrpix`, and the cube root amplifies them
+
+`1.0/(x*(pi/6))` and `6.0/(pi*x)` are the same number in exact arithmetic and
+differ by 2 ulp in float64 for σg = 2.0 and 1.8. That would be unremarkable if
+it stopped there. It does not: `drydp` takes the cube root of a product
+involving it, and over 200,000 random `wvol` in [1e-19, 1e-15] the two
+spellings give different doubles on **53.2% (mode 4), 53.3% (mode 7) and 64.5%
+(mode 8)** of points. Mode 4 is active in setups 1–5 and 8.
+
+So the spelling is load-bearing, and the answer to "does a 2 ulp constant
+matter here" is yes, on half the domain.
+
+## `l_fix_neg_pvol_wat` cannot be tested through `rhosol_strat`
+
+The flag looks like it protects the stratospheric density, and
+`docs/fidelity.md` said so. It does not, and the argument is short enough to
+check: the two arms differ only where `ws*100 > 99`, the clamped arm then gives
+`wts = 99` and the unclamped arm more, and `(NINT(wts/5))*5` sends **both** to
+100 or above — while `percent` (`ukca_vapour.F90:90`) stops at 95. Neither
+matches, both fall through to `rhosol_strat = 1300.0`.
+
+`rhosol_strat` is therefore bit-identical at both settings at every input, and
+a both-settings test written against it could not fail. What the flag moves is
+`wts`, and through it `mdwat` at `ukca_volume_mode.F90:436`.
+
 ## Setup coverage of the shipped namelists
 
 `boundary_layer` and `free_troposphere` are both `i_mode_setup = 1` — four

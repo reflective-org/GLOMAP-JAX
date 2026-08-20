@@ -16,6 +16,7 @@ No `fortran` marker: the golden is committed, so this runs in CI.
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import numpy as np
 import pytest
 
@@ -152,7 +153,7 @@ def test_vapour_round_selects_the_same_table_entry_as_the_fortran(sweep):
     ours = np.asarray(numerics.vapour_round(x))
     np.testing.assert_array_equal(ours, sweep["vapour_round_y"])
     disagree = naive != sweep["vapour_round_y"]
-    assert set(x[disagree]) == {42.5, 52.5, 62.5, 72.5, 82.5, 92.5}
+    assert set(x[disagree]) == {42.5, 52.5, 62.5, 72.5, 82.5, 92.5, 102.5}
     assert (ours[disagree] == sweep["vapour_round_y"][disagree]).all()
 
 
@@ -195,3 +196,49 @@ def test_masked_sum_excludes_rather_than_multiplies():
 
     naive = jnp.sum(mask.astype(jnp.float64) * term)
     assert np.isnan(float(naive)), "the hazard this guards against is gone"
+
+
+# --- Why every byte-equality gate runs eager ---
+
+
+def test_xla_contracts_multiply_add_under_jit_and_gfortran_does_not():
+    """`jit` is not byte-equal to the reference, and this is why.
+
+    XLA-CPU contracts `a*b + c` into a true FMA -- one rounding instead of two.
+    The reference is built `-ffp-contract=off` on every variant
+    (`build_reference.sh:37`, `build_f2py.sh:42`), so the Fortran always rounds
+    twice. Measured here: 23% of random triples differ, and every differing
+    jitted value is the correctly-rounded FMA rather than anything fast-math
+    might have done.
+
+    `CLAUDE.md` already says port first and `jit` second, with the eager driver
+    kept permanently. What was missing was the cost: on the ZSR polynomials in
+    `ukca_water_content_v` the jit-vs-eager gap reaches 4.8e-11, which is three
+    orders past `RTOL_JIT_VS_EAGER`. So that constant is a finding to
+    investigate before order 2, not a knob to widen. Issue #23.
+
+    The assertion is written to hold on any backend: contraction is allowed to
+    happen or not, but if it happens the result must be the FMA. A backend that
+    reassociated instead -- the thing fast-math would do, and the thing that
+    would genuinely threaten the port -- fails here.
+    """
+    from fractions import Fraction
+
+    rng = np.random.default_rng(0)
+    a, b, c = (rng.standard_normal(20000) for _ in range(3))
+
+    def fn(x, y, z):
+        return x * y + z
+
+    eager = np.asarray(fn(jnp.asarray(a), jnp.asarray(b), jnp.asarray(c)))
+    jitted = np.asarray(jax.jit(fn)(jnp.asarray(a), jnp.asarray(b), jnp.asarray(c)))
+
+    differ = np.flatnonzero(eager != jitted)
+    print(f"\njax {jax.__version__}: jit differs from eager on {differ.size}/{a.size} triples")
+    for i in differ[:64]:
+        exact = Fraction(float(a[i])) * Fraction(float(b[i])) + Fraction(float(c[i]))
+        assert jitted[i] == float(np.float64(exact)), (
+            f"jit at index {i} is neither the double-rounded nor the fused result; "
+            "something other than FMA contraction is happening and the port is at risk"
+        )
+    assert np.allclose(eager, jitted, rtol=1e-12, atol=0.0)

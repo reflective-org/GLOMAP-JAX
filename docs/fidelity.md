@@ -162,10 +162,21 @@ Registered against `ukca_vapour`, not `ukca_volume_mode`. In `volume_mode`
 `mdwat` and has no numerical effect. Its actual numerical effect is in
 `ukca_vapour`. With the flag **true** — the box model's setting — `:184` gives
 `wts = MIN(99.0, MAX(41.0, ws*100))`; the unfixed branch at `:188` is
-`MAX(41.0, ws*100)`, with no upper clamp. So `True` is the clamped form, which
-matters for the stratospheric density branch. (This entry previously named the
-two the wrong way round, which would have led a porter to implement the unfixed
-branch as the default.)
+`MAX(41.0, ws*100)`, with no upper clamp. So `True` is the clamped form.
+(This entry previously named the two the wrong way round, which would have led
+a porter to implement the unfixed branch as the default.)
+
+**It does not reach `rhosol_strat`, despite that being the output the clamp
+looks like it protects.** The two arms differ only where `ws*100 > 99`. There,
+the clamped arm gives `wts = 99` and the unclamped arm gives more — and
+`:226`'s `(NINT(wts/5))*5` sends *both* to 100 or above, while `percent`
+(`:90`) stops at 95. So neither matches, both fall through to the
+`rhosol_strat = 1300.0` set at `:223`, and the density is bit-identical at both
+settings at every input. Confirmed by execution as well as by the algebra.
+
+What the flag actually moves is `wts` itself, and therefore `mdwat` through
+`ukca_volume_mode.F90:436`. A both-settings test written against
+`rhosol_strat` — which this entry invited — could not fail.
 
 Registering it against the wrong routine would make its default meaningless.
 
