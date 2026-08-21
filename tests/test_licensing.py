@@ -23,8 +23,18 @@ def _read(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_licence_is_bsd_3_clause_with_crown_copyright():
+def test_root_licence_is_apache_2():
+    """Fails if the outbound licence is reverted to BSD-3 or truncated."""
     text = _read("LICENCE")
+    assert "Apache License" in text
+    assert "Version 2.0, January 2004" in text
+    # The last section of the terms -- gone if the text is truncated.
+    assert "9. Accepting Warranty or Additional Liability" in text
+
+
+def test_fortran_licence_is_bsd_3_clause_with_crown_copyright():
+    """Fails if a re-vendor drops the BSD notice that clause 1 obliges us to keep."""
+    text = _read("fortran/LICENCE")
     assert "BSD 3-Clause" in text
     assert "Crown Copyright (c) Met Office" in text
     # Clause 3 must be present verbatim -- it is what forbids implying endorsement.
