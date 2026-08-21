@@ -63,4 +63,21 @@ LOGICAL, SAVE :: init_l_dust_mp_ageing = .FALSE.
 ! every entry point refuses until the process is restarted.
 LOGICAL, SAVE :: must_restart = .FALSE.
 
+! Set by wrap_set_fix_water_content. ukca_water_content_v is the one science
+! routine that needs no box init at all -- it reads only ncation/nanion (both
+! PARAMETERs), its own DATA tables, and glomap_config's flag -- and it is the
+! one routine that MUST be reachable before init, because :235 patches its
+! SAVEd `y` table in place and never restores it (issue #22).
+!
+! init_ukca_for_box hardcodes the flag .TRUE. at glomap_box_config_mod.F90:322
+! and then init_state runs volume_mode, which runs water_content_v, which fires
+! the latch. So after wrap_init the unpatched table is gone for the life of the
+! process and no setter can bring it back. The only way to sweep the unfixed
+! arm is a process that sets the flag and calls the leaf WITHOUT init.
+!
+! Nothing gives the flag a value before then -- glomap_config_type declares no
+! default and init_ukca_configuration, which would set .FALSE., has no caller.
+! So the leaf refuses unless the flag has been set explicitly or init has run.
+LOGICAL, SAVE :: water_flag_set = .FALSE.
+
 END MODULE glomap_f2py_state

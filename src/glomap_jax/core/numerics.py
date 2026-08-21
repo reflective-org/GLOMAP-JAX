@@ -114,12 +114,24 @@ def nint(x: Array) -> Array:
 def fortran_max(a: Array, b: Array) -> Array:
     """Fortran ``MAX(a, b)``, including what it does with a ``NaN``.
 
-    ``jnp.maximum`` and ``np.maximum`` propagate ``NaN``. gfortran does not: it
-    lowers ``MAX(a, b)`` to ``(b > a) ? b : a``, so a ``NaN`` *second* argument
-    yields the first. Measured against the compiled routine, not assumed --
-    ``ukca_vapour.F90:188`` computes ``MAX(41.0, ws*100.0)`` and returns
-    **41.0** at the one grid point where ``ws`` is ``NaN``, where
-    ``jnp.maximum`` gives ``NaN``.
+    ``jnp.maximum`` and ``np.maximum`` propagate ``NaN``. **The reference build
+    does not**: ``ukca_vapour.F90:188`` computes ``MAX(41.0, ws*100.0)`` and
+    returns **41.0** at the grid point where ``ws`` is ``NaN``, where
+    ``jnp.maximum`` gives ``NaN``. Measured against the compiled routine, and
+    then against a standalone probe at ``-O0`` through ``-O3`` under this
+    project's exact flags -- 41.0 at every level, consistent with
+    ``(b > a) ? b : a``.
+
+    **This is a property of the build, not of Fortran.** The standard leaves
+    ``MAX`` with a ``NaN`` argument unspecified, and the sensitivity is not
+    theoretical: the same probe compiled *without* ``-fdefault-real-8``
+    returned ``NaN`` at ``-O2`` while returning 41.0 at ``-O0``. So what this
+    function reproduces is ``TOOLCHAIN.txt``'s compiler and flags. If those
+    change, re-measure before trusting it -- and the gate that would catch a
+    change is
+    ``test_vapour.py::test_the_cancellation_pole_is_reached_and_survives_it``,
+    which compares against the compiled routine rather than against this
+    docstring.
 
     That point is not exotic. At T = 303.6479444122756 K the Ayers denominator
     ``b = ks3 + ks4/T`` is *exactly* zero, so ``d = a*a`` exactly,
@@ -138,11 +150,15 @@ def fortran_max(a: Array, b: Array) -> Array:
 def fortran_min(a: Array, b: Array) -> Array:
     """Fortran ``MIN(a, b)``: ``(b < a) ? b : a``, mirroring `fortran_max`.
 
-    Unexercised in the current port -- ``ukca_vapour.F90:184``'s
+    Measured the same way and, unlike ``MAX``, stable: ``MIN(99.0, NaN)``
+    returned 99.0 at every optimisation level in both probes, including the one
+    where ``MAX`` flipped.
+
+    Its ``NaN`` case is unexercised in the current port -- ``:184``'s
     ``MIN(99.0, MAX(...))`` can only see a ``NaN`` if ``MAX`` produced one, and
-    it cannot. Provided anyway so the pair is used consistently rather than one
-    routine reaching for `jnp.minimum` because its ``NaN`` case looked
-    unreachable at the time.
+    under these flags it cannot. Provided anyway so the pair is used
+    consistently, rather than one routine reaching for ``jnp.minimum`` because
+    its ``NaN`` case looked unreachable at the time.
     """
     return jnp.where(b < a, b, a)
 

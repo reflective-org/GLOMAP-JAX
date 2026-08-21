@@ -259,7 +259,7 @@ SUBROUTINE leaf_water_content(n, mask_i, ions_i, cl, rh, wc, ierr)
 USE ukca_water_content_v_mod, ONLY: ukca_water_content_v
 USE ukca_mode_setup,          ONLY: ncation, nanion
 USE ukca_types_mod,           ONLY: log_small
-USE glomap_f2py_state,        ONLY: is_initialised, must_restart
+USE glomap_f2py_state,        ONLY: is_initialised, must_restart, water_flag_set
 IMPLICIT NONE
 INTEGER,      INTENT(IN)  :: n
 INTEGER,      INTENT(IN)  :: mask_i(n)
@@ -279,7 +279,12 @@ IF (must_restart) THEN
   ierr = 1
   RETURN
 END IF
-IF (.NOT. is_initialised) THEN
+! Init OR an explicit flag. This routine reads no SAVEd constant that init
+! populates, so requiring init would make the unfixed arm unreachable -- see
+! wrap_set_fix_water_content. What it does need is a DEFINED flag: nothing
+! initialises glomap_config%l_fix_ukca_water_content before init, and reading
+! it undefined would silently select an arm at random.
+IF (.NOT. (is_initialised .OR. water_flag_set)) THEN
   ierr = 4
   RETURN
 END IF
@@ -413,8 +418,15 @@ END SUBROUTINE leaf_volume_mode
 ! ---------------------------------------------------------------------------
 
 SUBROUTINE wrap_set_fix_water_content(v, ierr)
+! Usable BEFORE wrap_init, unlike every other entry point here, and that is the
+! whole point. init_ukca_for_box hardcodes this flag .TRUE.
+! (glomap_box_config_mod.F90:322) and then init_state calls volume_mode ->
+! water_content_v, which patches its own SAVEd table and never restores it.
+! After init the unpatched table does not exist in this process. Setting the
+! flag first, and calling leaf_water_content without init, is the only way to
+! reach the unfixed arm at all.
 USE ukca_config_specification_mod, ONLY: glomap_config
-USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+USE glomap_f2py_state,             ONLY: must_restart, water_flag_set
 IMPLICIT NONE
 INTEGER, INTENT(IN)  :: v
 INTEGER, INTENT(OUT) :: ierr
@@ -422,12 +434,9 @@ IF (must_restart) THEN
   ierr = 1
   RETURN
 END IF
-IF (.NOT. is_initialised) THEN
-  ierr = 4
-  RETURN
-END IF
 ierr = 0
 glomap_config%l_fix_ukca_water_content = (v /= 0)
+water_flag_set = .TRUE.
 END SUBROUTINE wrap_set_fix_water_content
 
 

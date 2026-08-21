@@ -93,40 +93,61 @@ CHILD_PREAMBLE = textwrap.dedent("""
     sys.path.insert(0, {f2py!r})
     import glomap_f2py as g
 
-    _nml, _setup, _fix_water, _fix_neg_pvol = sys.argv[1:5]
+    _nml, _setup, _fix_water, _fix_neg_pvol, _do_init = sys.argv[1:6]
     _setup = int(_setup)
     _fix_water = int(_fix_water)
     _fix_neg_pvol = int(_fix_neg_pvol)
+    _do_init = int(_do_init)
 
     g.wrap_ereport_reset()
-    _ierr = int(g.wrap_init(_nml))
-    if _ierr != 0:
-        print("@@FAIL@@" + json.dumps({{"stage": "wrap_init", "ierr": _ierr}}))
-        raise SystemExit(0)
 
-    for _setter, _value in ((g.wrap_set_fix_water_content, _fix_water),
-                            (g.wrap_set_fix_neg_pvol_wat, _fix_neg_pvol)):
-        if _value >= 0:
-            _e = int(_setter(_value))
+    # The water flag goes on BEFORE init when there is one, and instead of init
+    # when there is not. ukca_water_content_v patches its own SAVEd table the
+    # first time it runs with l_fix_ukca_water_content on and never restores it
+    # (issue #22) -- and init_ukca_for_box hardcodes that flag .TRUE. at
+    # glomap_box_config_mod.F90:322, then runs init_state -> volume_mode ->
+    # water_content_v. By the time wrap_init returns, the unpatched table is
+    # gone for the life of the process.
+    if _fix_water >= 0:
+        _e = int(g.wrap_set_fix_water_content(_fix_water))
+        if _e != 0:
+            print("@@FAIL@@" + json.dumps({{"stage": "set_fix_water", "ierr": _e}}))
+            raise SystemExit(0)
+
+    if _do_init:
+        _ierr = int(g.wrap_init(_nml))
+        if _ierr != 0:
+            print("@@FAIL@@" + json.dumps({{"stage": "wrap_init", "ierr": _ierr}}))
+            raise SystemExit(0)
+        # init overwrites the flag; re-apply so it says what this run means.
+        if _fix_water >= 0:
+            _e = int(g.wrap_set_fix_water_content(_fix_water))
             if _e != 0:
-                print("@@FAIL@@" + json.dumps({{"stage": _setter.__name__, "ierr": _e}}))
+                print("@@FAIL@@" + json.dumps({{"stage": "re-set_fix_water", "ierr": _e}}))
                 raise SystemExit(0)
 
-    # Read back, from the Fortran, what this process actually holds.
-    _fw, _fn, _got_setup, _e = g.wrap_get_config_flags()
-    if int(_e) != 0:
-        print("@@FAIL@@" + json.dumps({{"stage": "wrap_get_config_flags", "ierr": int(_e)}}))
-        raise SystemExit(0)
-    if int(_got_setup) != _setup:
-        print("@@FAIL@@" + json.dumps({{
-            "stage": "setup readback", "want": _setup, "got": int(_got_setup)}}))
-        raise SystemExit(0)
-    for _name, _want, _got in (("fix_water", _fix_water, int(_fw)),
-                               ("fix_neg_pvol", _fix_neg_pvol, int(_fn))):
-        if _want >= 0 and _want != _got:
-            print("@@FAIL@@" + json.dumps({{
-                "stage": f"{{_name}} readback", "want": _want, "got": _got}}))
+    if _fix_neg_pvol >= 0 and _do_init:
+        _e = int(g.wrap_set_fix_neg_pvol_wat(_fix_neg_pvol))
+        if _e != 0:
+            print("@@FAIL@@" + json.dumps({{"stage": "set_fix_neg_pvol", "ierr": _e}}))
             raise SystemExit(0)
+
+    # Read back, from the Fortran, what this process actually holds.
+    if _do_init:
+        _fw, _fn, _got_setup, _e = g.wrap_get_config_flags()
+        if int(_e) != 0:
+            print("@@FAIL@@" + json.dumps({{"stage": "wrap_get_config_flags", "ierr": int(_e)}}))
+            raise SystemExit(0)
+        if int(_got_setup) != _setup:
+            print("@@FAIL@@" + json.dumps({{
+                "stage": "setup readback", "want": _setup, "got": int(_got_setup)}}))
+            raise SystemExit(0)
+        for _name, _want, _got in (("fix_water", _fix_water, int(_fw)),
+                                   ("fix_neg_pvol", _fix_neg_pvol, int(_fn))):
+            if _want >= 0 and _want != _got:
+                print("@@FAIL@@" + json.dumps({{
+                    "stage": f"{{_name}} readback", "want": _want, "got": _got}}))
+                raise SystemExit(0)
 """)
 
 
@@ -137,6 +158,7 @@ def run_child(
     setup: int,
     fix_water: int = -1,
     fix_neg_pvol: int = -1,
+    init: bool = True,
     label: str | None = None,
 ) -> dict:
     """Run one configuration in its own process and return its `@@RESULT@@`.
@@ -148,6 +170,10 @@ def run_child(
 
     `fix_water` and `fix_neg_pvol` are -1 for "leave alone", 0 or 1 to set and
     then confirm from the Fortran.
+
+    `init=False` skips `wrap_init` entirely. Only `ukca_water_content_v` may be
+    driven that way -- it reads no SAVEd constant init populates -- and it is
+    the only routine that *must* be, because init latches its table on.
     """
     label = label or f"setup {setup} (fix_water={fix_water}, fix_neg_pvol={fix_neg_pvol})"
     script = CHILD_PREAMBLE.format(f2py=str(F2PY_DIR)) + textwrap.dedent(body)
@@ -155,7 +181,16 @@ def run_child(
         nml = Path(tmp) / "case.nml"
         nml.write_text(namelist_text, encoding="utf-8")
         proc = subprocess.run(
-            [sys.executable, "-c", script, str(nml), str(setup), str(fix_water), str(fix_neg_pvol)],
+            [
+                sys.executable,
+                "-c",
+                script,
+                str(nml),
+                str(setup),
+                str(fix_water),
+                str(fix_neg_pvol),
+                str(int(init)),
+            ],
             capture_output=True,
             text=True,
         )
