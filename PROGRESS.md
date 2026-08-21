@@ -354,7 +354,77 @@ Filed rather than fixed: #19 (uninitialised index variables), #20 (dead
 `ukca_mode_allcp_4mode`, where citations drift), #21 (ADR-008's benchmark is
 not committed, so its table cannot be re-derived).
 
-## Phases D–K — physics: not started
+## Phase D — size, water and volume: **9/12**
+
+| # | Task | Commit |
+|---|---|---|
+| 34 | Transcendental/rounding compat layer | satisfied by task 21 |
+| 35a | Four physics leaf drivers + shared capture machinery | `98847f0`, `a9c124a` |
+| 35b | Vapour fixture | `e93738e` |
+| 35d | Drydiam fixture | `fb13a08` |
+| 35e | `volume_mode` fixture | `task-35e` |
+| 36 | `calc_drydiam` core | `6e19c0d` |
+| 37 | Undersize reset, modes 1–3 | `6e19c0d` |
+| 38 | `ukca_vapour` | `7c02d33` |
+| 39 | The two ZSR ion tables | `3b858ec` |
+| 40 | `water_content_v` | `9fd9cbb` |
+
+Remaining: 35c (water fixture, in flight), and 41–45 (`volume_mode`, strictly
+serial on one file).
+
+**Every port is byte-equal to the compiled routine**, not to a tolerance. Three
+of the plan's acceptance criteria were unfailable as written and were tightened
+before any code was accepted against them: task 36's `RTOL_ALGEBRAIC` is 1e-13
+while `jnp.cbrt` differs from `x**(1.0/3.0)` by at most 1.3e-14, so a port using
+the forbidden cube root passed it; task 38's `RTOL_TRANSCENDENTAL` covered a
+live path containing only `LOG` and `SQRT`; task 40's covered a routine with no
+transcendental at all.
+
+### Three findings that changed the work
+
+**`jit` is not byte-equal to the reference.** XLA contracts `a*b + c` into an
+FMA; the Fortran is built `-ffp-contract=off`. 23.4% of random triples differ,
+and every differing value is the correctly-rounded FMA — checked exactly with
+`Fraction`, so this is contraction and not fast-math reassociation. On the ZSR
+polynomials the gap reaches 4.8e-11 against `RTOL_JIT_VS_EAGER = 1e-14`, a
+constant that was a plausible tightness rather than a measurement. Order 1 is
+unaffected because every gate runs eager; order 2 cannot claim jit parity until
+#23 is settled.
+
+**`l_fix_ukca_water_content` is off-limits after `init`.**
+`glomap_box_config_mod.F90:322` hardcodes it `.TRUE.` — it is not a namelist
+variable — and `init_ukca_for_box` then runs `init_state` → `volume_mode` →
+`water_content_v`, which patches its own `SAVE`d table in place and never
+restores it. The latch has fired before `wrap_init` returns, so setting the
+flag afterwards changes the flag and not the table: measured, the flag reads
+back 0 and the routine still returns the fixed answer. Task 40's both-settings
+acceptance was unsatisfiable by the obvious route and would have passed
+vacuously. Reachable only by not calling `wrap_init` at all, which that routine
+uniquely permits. Issue #22.
+
+**gfortran's `MAX` does not propagate `NaN` here, and that is load-bearing.**
+At the one temperature where `ukca_vapour`'s Ayers denominator is *exactly*
+zero, `xsb` is `0/0` and everything downstream is `NaN` until
+`MAX(41.0, ws*100)` — which returns 41.0 where `jnp.maximum` gives `NaN`. Not a
+language property: measured 41.0 at `-O0` through `-O3` under this project's
+flags, but a probe without `-fdefault-real-8` returned `NaN` at `-O2`. What
+`numerics.fortran_max` reproduces is `TOOLCHAIN.txt`.
+
+**UP-11 is a crash, not a truncation.** Writing the five-way negative-size
+diagnostic into its 256-character buffer gives "Fortran runtime error: End of
+record" and exit 2 at `:876`, so `ereport` at `:877` never runs. Reproduced
+standalone and in the model. The block exists to say which mode went
+non-positive and where; it aborts naming neither.
+
+### Coverage the fixtures bought
+
+Three `volume_mode` branches had never executed in any validated run and now
+have reference data: the stratospheric override (all four namelists run above
+`putls`), `mask_nosol` (0 hits in 2447 sampled golden points), and the
+relative-humidity clamps. The undersize reset is 0 of 3456 `undersize` records
+across all four branch dumps and is now reached by constructed inputs.
+
+## Phases E–K — physics: not started
 
 ## Orders 2 and 3: not started
 
