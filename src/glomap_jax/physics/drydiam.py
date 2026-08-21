@@ -45,7 +45,8 @@ paraphrase loses:
 * `dp_thresh1 = ddplim0(imode)*0.1` is a *product*, evaluated per mode. Not a
   literal, and not `ddplim0/10`.
 
-**No shipped namelist ever reaches it** — 0 of 2160 records in the branch dump.
+**No shipped namelist ever reaches it** — 0 of 3456 `undersize` records across
+all four committed branch dumps.
 It needs constructed inputs, which is what task 35d's fixture is for.
 
 ## Faithful forms

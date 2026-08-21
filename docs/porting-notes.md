@@ -105,14 +105,21 @@ select between.
 
 Never observed, and therefore not validated by any trajectory golden:
 
-| predicate | routine | records |
-|---|---|---|
-| `MDCPNEW < 0` → `ND = 0`, `mask1` falsified mid-`ICP` | `ukca_coagwithnucl` | 0 / 19440 |
-| the undersize reset `DP < DDPLIM0·0.1` | `ukca_calc_drydiam` | 0 / 2160 |
-| any mode merge at all | `ukca_remode` | 0 / 864 |
-| the `FRAC_N < 0.5` / `FRAC_M < 0.001` clamps | `ukca_remode` | never entered |
-| the Kulmala and boundary-layer nucleation gates | `ukca_calcnucrate` | never entered |
-| `NTOT < 4` with `T < 195.15` → flat `J = 1e5` | `ukca_binapara` | 0 / 2160 |
+Counts are over **all four** committed cases. Several were first written for
+the three shipped namelists only, before `bl_nmts3` was added, and the smaller
+denominators survived — the undersize reset was recorded as 0/2160, which is
+3 x 720 and omits `bl_nmts3`'s 1296. Recomputed from the committed archives:
+
+| predicate | tag | routine | records |
+|---|---|---|---|
+| `MDCPNEW < 0` → `ND = 0`, `mask1` falsified mid-`ICP` | `mdcp_neg` | `ukca_coagwithnucl` | 0 / 23760 |
+| the undersize reset `DP < DDPLIM0·0.1` | `undersize` | `ukca_calc_drydiam` | 0 / **3456** |
+| any mode merge at all | `merge_trigger` | `ukca_remode` | 0 / 1440 |
+| the coagulation kernel's Fuchs corrections | `mask4`, `mask4i` | `ukca_coagwithnucl` | 0 / 19440, 0 / 14400 |
+| UP-4's `delgc_cond > gc` guard | `up4_guard` | `ukca_conden` | 0 / 3600 |
+| the `SQD·Δt > 50` clamp and the `TAN` pole | `sqd_clamp`, `tan_pole` | `ukca_solvecoagnucl_v` | 0 / 12240 each |
+| `NTOT < 4`, and `T < 195.15` → flat `J = 1e5` | `ntot_lt_4`, `t_lt_195` | `ukca_binapara` | 0 / 2880 each |
+| `l2` | `l2` | `ukca_calcnucrate` | 0 / 2880 |
 
 The remode entries are the sharpest gap: mode merging is the highest-variance
 part of the port, its mode loop is loop-carried, and no shipped case merges at

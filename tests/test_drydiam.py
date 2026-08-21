@@ -148,7 +148,8 @@ def test_the_port_is_byte_equal_to_the_compiled_routine(setup):
 def test_the_undersize_reset_actually_fires(setup):
     """Task 37's acceptance. Without this the byte-equality test above passes
     on a port that never implements the reset at all, because no shipped
-    namelist reaches it -- 0 of 2160 records in the branch dump."""
+    namelist reaches it -- 0 of 3456 `undersize` records across all four
+    committed branch dumps."""
     tab, nd, md, mdt = _grid(setup)
     want = _reference(setup, nd, md, mdt)
     fired = ~np.isclose(np.array(want["md"]), md, rtol=0, atol=0)
