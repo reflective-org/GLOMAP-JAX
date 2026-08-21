@@ -46,6 +46,12 @@ identity here is a property of the platform pair, not of these functions --
 ``tests/conftest.py:assert_matches_reference`` and the ``linux-reference`` CI
 job are what keep that honest. See docs/porting-notes.md.
 
+One hazard that DOES have a shim, added late and found the hard way: XLA
+rewrites division by a scalar constant into multiplication by its reciprocal,
+and whether it does so eagerly depends on the JAX version. ``true_divide``
+below is the shim; the numbers are in its docstring. It cost a whole task's
+byte equality when the port was validated on jax 0.9.2 and run on 0.11.0.
+
 One hazard with no shim, because none is possible: XLA flushes the *result of
 any arithmetic operation* to zero when it would be subnormal, and gfortran does
 not. A subnormal constant survives conversion, so the value is representable
@@ -173,6 +179,51 @@ def vapour_round(x: Array) -> Array:
     return nint(x / 5.0) * 5.0
 
 
+def true_divide(numerator: Array, denominator) -> Array:
+    """``x / c`` for a *scalar constant* ``c``, without the reciprocal rewrite.
+
+    **XLA rewrites ``divide(x, broadcast(c))`` into ``multiply(x, broadcast(1/c))``
+    for any scalar constant, not only for powers of two.** ``1/c`` is inexact
+    for almost every ``c``, so the result is a different double from the
+    division gfortran performs. Measured on this arm64 build over 200,000
+    values, eager, against the same expression in numpy:
+
+    ========================  =============  =====================
+    divisor                   jax 0.11.0     jax 0.9.2
+    ========================  =============  =====================
+    ``f_ao = 0.150/0.0168``   63,075 differ  0
+    ``avogadro = 6.022e23``   5,930 differ   0
+    ``p0 = 101325.0``         28,752 differ  0
+    ``5.0``                   68,606 differ  0
+    ========================  =============  =====================
+
+    So this is a **version-dependent** rewrite: jax 0.9.2 emits a true divide
+    eagerly and jax 0.11.0 does not. A port validated on 0.9.2 and run on
+    0.11.0 loses byte equality by 1 ulp at every such site, which is how this
+    was found -- ``tests/test_volume_mode.py`` went from green to 73 failures
+    across interpreters with no source change. ``.venv`` is the canonical
+    interpreter (``Makefile:18``); validate there.
+
+    The fix is to materialise the divisor at the numerator's shape, so the
+    operand is a buffer rather than a broadcast constant the simplifier can
+    fold. ``jnp.asarray(c)`` and ``lax.optimization_barrier`` on a 0-d constant
+    both **fail** to prevent it -- measured, same counts as the plain form.
+
+    **Eager only.** Under ``jax.jit`` XLA constant-folds the materialised
+    divisor straight back into a broadcast and reapplies the rewrite, on 0.9.2
+    as well as 0.11.0 (63,075 differ in both). Byte-equality gates run eager by
+    rule -- see the FMA contraction finding, issue #23 -- and this is a second,
+    independent reason for it.
+
+    Use this wherever the Fortran divides an *array* by a scalar constant.
+    Where both operands are arrays there is no constant to fold and ordinary
+    ``/`` is correct; where the numerator is the constant (``1.0/x``) the
+    expression is already a reciprocal.
+    """
+    x = jnp.asarray(numerator)
+    return x / jnp.full(jnp.shape(x), denominator, dtype=x.dtype)
+
+
 def safe_divide(numerator: Array, denominator: Array, where: Array) -> Array:
     """Divide under a mask without poisoning the gradient.
 
@@ -211,5 +262,6 @@ __all__ = [
     "masked_sum",
     "nint",
     "safe_divide",
+    "true_divide",
     "vapour_round",
 ]
