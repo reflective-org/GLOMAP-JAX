@@ -27,11 +27,47 @@ GOLDENS = REPO / "tests" / "goldens"
 
 sys.path.insert(0, str(REPO / "validation"))
 
-import capture_coag_mode as ccm  # noqa: E402
 import capture_leaf as cl  # noqa: E402
 import capture_modes as cm  # noqa: E402
+import leaf_common as lc  # noqa: E402
 
 NAMELIST = (REPO / "fortran" / "namelists" / "boundary_layer.nml").read_text(encoding="utf-8")
+
+
+CAPTURES = sorted((REPO / "validation").glob("capture_*.py"))
+
+
+def _child_scripts():
+    """Every capture module that drives a subprocess, found rather than listed.
+
+    This was two hardcoded entries. A new capture script inherited neither of
+    the child checks below -- which is how a script whose setup readback was
+    missing would have shipped green.
+    """
+    import importlib
+
+    found = []
+    # leaf_common is not a capture script but supplies the child preamble the
+    # phase-D captures share, so it has to satisfy the same rules -- otherwise
+    # four scripts inherit their subprocess machinery from an unchecked source.
+    modules = [path.stem for path in CAPTURES] + ["leaf_common"]
+    for name in modules:
+        module = importlib.import_module(name)
+        for attr in ("_CHILD", "CHILD_PREAMBLE"):
+            script = getattr(module, attr, None)
+            if not isinstance(script, str) or "wrap_init" not in script:
+                continue
+            if "{f2py" in script:
+                # A format template, not runnable source. Resolve it the way
+                # the runner does, so the checks below see what actually runs
+                # rather than the unsubstituted text.
+                script = script.format(f2py=str(REPO / "validation" / "f2py"))
+            found.append((f"{name}.{attr}", script))
+    assert found, "no capture script defines a child; the discovery is broken"
+    return found
+
+
+CHILD_SCRIPTS = _child_scripts()
 
 
 def _setup_in(text):
@@ -170,19 +206,30 @@ def test_a_missing_combination_is_refused(golden_records):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("script", [cm._CHILD, ccm._CHILD], ids=["modes", "coag_mode"])
-def test_the_child_scripts_compile(script):
+@pytest.mark.parametrize("name, script", CHILD_SCRIPTS, ids=[n for n, _ in CHILD_SCRIPTS])
+def test_the_child_scripts_compile(name, script):
     """They run seven subprocesses deep on a machine with a toolchain; a syntax
     error in one would surface there and nowhere else."""
     compile(script, "<child>", "exec")
 
 
-@pytest.mark.parametrize("script", [cm._CHILD, ccm._CHILD], ids=["modes", "coag_mode"])
-def test_the_child_scripts_read_the_setup_back_out_of_the_fortran(script):
+@pytest.mark.parametrize("name, script", CHILD_SCRIPTS, ids=[n for n, _ in CHILD_SCRIPTS])
+def test_the_child_scripts_read_the_setup_back_out_of_the_fortran(name, script):
     """Every check on the namelist text is a check on the text. This is the one
-    that fails when the text was right and the setup still did not take."""
-    assert "wrap_sizes()" in script
-    assert re.search(r"assert int\((sizes\[7\]|i_mode_setup)\) == ", script), script
+    that fails when the text was right and the setup still did not take.
+
+    Two spellings are accepted because there are two: the older captures read
+    `wrap_sizes()` and assert, and the phase-D preamble reads
+    `wrap_get_config_flags()` -- which also returns both fidelity flags -- and
+    reports a structured failure instead of raising. What is required is that
+    the value comes back *from the Fortran* and that a mismatch stops the run.
+    """
+    reads_setup = "wrap_sizes()" in script or "wrap_get_config_flags()" in script
+    assert reads_setup, f"{name} never reads the setup back out of the Fortran"
+    refuses = re.search(
+        r"assert int\((sizes\[7\]|i_mode_setup)\) == |int\(_got_setup\) != _setup", script
+    )
+    assert refuses, f"{name} reads the setup back but does not refuse on a mismatch"
 
 
 @pytest.mark.fortran
@@ -203,9 +250,6 @@ def test_the_readback_actually_fires_against_the_fortran(tmp_path):
     assert proc.returncode != 0, proc.stdout
     assert "@@RESULT@@" not in proc.stdout
     assert "wrong setup" in proc.stderr, proc.stderr
-
-
-CAPTURES = sorted((REPO / "validation").glob("capture_*.py"))
 
 
 @pytest.mark.parametrize("path", CAPTURES, ids=lambda p: p.name)
@@ -322,11 +366,96 @@ def test_check_no_ereport_refuses_a_sweep_that_reached_the_shim(after, expected)
         cl.check_no_ereport((0, 0, 0), after, "leaf_erf", (7, b"routine", b"message"))
 
 
-def test_the_capture_checks_the_shim_around_every_driver_call():
-    """Every `leaf_*` call in the capture goes through the wrapper that counts.
-    A new sweep added without it is the omission this test exists to catch."""
-    source = (REPO / "validation" / "capture_leaf.py").read_text(encoding="utf-8")
+@pytest.mark.parametrize("path", CAPTURES, ids=lambda p: p.name)
+def test_the_capture_checks_the_shim_around_every_driver_call(path):
+    """Every `leaf_*` call goes through the wrapper that counts the shim either
+    side of it. A new sweep added without it is the omission this exists to
+    catch -- and it used to read one script by name, so a new script inherited
+    nothing. It globs now."""
+    source = path.read_text(encoding="utf-8")
+    if "def capture(" not in source:
+        pytest.skip(f"{path.name} has no capture() to inspect")
     body = source.split("def capture(", 1)[1]
     for call in re.findall(r"g\.leaf_\w+|driver\(", body):
         line = next(ln for ln in body.splitlines() if call in ln and "def " not in ln)
-        assert "call(" in line, f"{call} is not wrapped by the ereport check: {line.strip()}"
+        assert "call(" in line, (
+            f"{path.name}: {call} is not wrapped by the ereport check: {line.strip()}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# leaf_common (task 35a) -- the machinery the four phase-D captures share
+# ---------------------------------------------------------------------------
+
+
+def test_check_varied_accepts_records_that_differ():
+    lc.check_varied({"a": {"x": [1, 2]}, "b": {"x": [3, 4]}})
+
+
+def test_check_varied_refuses_a_collapsed_capture():
+    """The incident this exists for: a substitution silently matched nothing,
+    the capture wrote one configuration seven times over, and every
+    byte-equality test passed against it."""
+    with pytest.raises(SystemExit, match="collided"):
+        lc.check_varied({"a": {"x": [1, 2]}, "b": {"x": [1, 2]}})
+
+
+def test_check_varied_accepts_a_collision_that_was_written_down():
+    """Some collisions are findings about the Fortran, not capture bugs --
+    `bc_oob` matching `default` because the SELECT CASE has no DEFAULT. Naming
+    them is what keeps the guard falsifiable rather than tuned to the output."""
+    lc.check_varied({"a": {"x": [1, 2]}, "b": {"x": [1, 2]}}, expected_identical=[("a", "b")])
+
+
+def test_check_varied_refuses_when_an_expected_collision_stops_happening():
+    """The other direction, and the one that is easy to leave out. If the
+    fall-through being recorded stops happening, the capture is no longer
+    capturing what it says it is."""
+    with pytest.raises(SystemExit, match="collided"):
+        lc.check_varied({"a": {"x": [1, 2]}, "b": {"x": [3, 4]}}, expected_identical=[("a", "b")])
+
+
+def test_the_shared_preamble_reads_both_fidelity_flags_back_too():
+    """Not just the setup. `l_fix_ukca_water_content` is a one-way latch in the
+    Fortran (#22), so a capture that believes it set the flag back to false is
+    the exact failure mode; the flag has to be confirmed from the module."""
+    script = dict(CHILD_SCRIPTS)["leaf_common.CHILD_PREAMBLE"]
+    assert "wrap_get_config_flags()" in script
+    assert "fix_water" in script and "fix_neg_pvol" in script
+    assert "_want != _got" in script, "the flags are read back but never compared"
+
+
+def test_bind_call_refuses_a_nonzero_ierr():
+    """A driver that returned ierr=4 produced numbers from an uninitialised
+    `rmdi`. They must not reach a golden."""
+
+    class FakeG:
+        def wrap_ereport_count(self):
+            return (0, 0, 0)
+
+        def wrap_ereport_last(self):
+            return (0, b"", b"")
+
+    call = lc.bind_call(FakeG())
+    assert call("ok", lambda: (1.0, 2.0, 0)) == (1.0, 2.0, 0)
+    with pytest.raises(SystemExit, match="ierr=4"):
+        call("cold", lambda: (1.0, 2.0, 4))
+
+
+def test_bind_call_refuses_when_the_shim_moved():
+    """An ereport during a sweep voids it: the shim returns where the real
+    thing would STOP, so whatever came back is a number and not an answer."""
+
+    class MovingG:
+        def __init__(self):
+            self.n = 0
+
+        def wrap_ereport_count(self):
+            self.n += 1
+            return (0, 0, 0) if self.n == 1 else (1, 0, 0)
+
+        def wrap_ereport_last(self):
+            return (7, b"ukca_calc_drydiam", b"negative dvol")
+
+    with pytest.raises(SystemExit, match="ereport"):
+        lc.bind_call(MovingG())("leaf_drydiam", lambda: (0.0, 0))
