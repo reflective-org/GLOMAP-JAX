@@ -92,6 +92,29 @@ TYPICAL_WEIGHTS = (0.50, 0.10, 0.20, 0.30, 0.40, 0.15)
 
 T_REF, S_REF, RH_REF = 213.0, 1.0e-2, 0.6
 P_TROP = 1.0e5
+P_STRAT = 1.0e4
+
+# The pmid axis. `putls` itself must be on it and must come out FALSE (`<`, not
+# `<=`), and its two neighbouring doubles bracket it. Every value is a decimal
+# literal or `np.nextafter`, both exact, so the axis is the same on any host.
+PMID_AXIS = (
+    1.0e4,
+    1.4999e4,
+    np.nextafter(PUTLS, 0.0),
+    PUTLS,
+    np.nextafter(PUTLS, np.inf),
+    2.0e4,
+    1.0e5,
+)
+
+# The t axis, swept at stratospheric pressure where t reaches an output. Chosen
+# to walk `(NINT(wts/5))*5` across ukca_vapour's twelve `percent` entries and
+# off the top of the table into the rhosol_strat = 1300.0 fall-through.
+T_AXIS = (180.0, 204.0, 209.5, 218.0, 232.5, 255.5, 288.5, 306.0, 326.5)
+
+# The s axis. bh2o = 1.609*s*pmid/p0 is clamped to [2e-8, 2e-6]
+# (ukca_vapour.F90:141-142), and both ends of this axis are outside it.
+S_AXIS = (1.0e-8, 2.0e-7, 2.0e-6, 1.0e-5, 1.0e-4, 1.0e-2)
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +377,11 @@ def test_mdwat_is_byte_equal_in_the_troposphere(setup, fix_water):
         grid["nd"],
         want["md_out"],  # the undersize reset rewrote md before volume_mode saw it
         grid["rh"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
         fix_water_content=bool(fix_water),
+        fix_neg_pvol_wat=True,
     )
     np.testing.assert_array_equal(np.asarray(got), want["mdwat"])
 
@@ -415,7 +442,17 @@ def test_the_so4_increments_are_applied_in_source_order():
     want = _reference(setup, _inputs(grid))
 
     # The faithful order.
-    got = volume_mode.mdwat(tab, grid["nd"], want["md_out"], grid["rh"], fix_water_content=True)
+    got = volume_mode.mdwat(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
     np.testing.assert_array_equal(np.asarray(got), want["mdwat"])
 
     # The mutation, spelled out here rather than left to a reviewer's
@@ -565,7 +602,17 @@ def test_h_can_be_absent():
         assert (cl[:, wt.ion_slot(1)] == 0.0).all(), "H+ is not exactly zero"
         assert (cl[:, wt.ion_slot(-2)] == 0.0).all(), "the row is not sulfate-free"
 
-    got = volume_mode.mdwat(tab, grid["nd"], want["md_out"], grid["rh"], fix_water_content=True)
+    got = volume_mode.mdwat(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
     np.testing.assert_array_equal(np.asarray(got), want["mdwat"])
     assert (np.asarray(got)[:, seasalt] > 0.0).all(), (
         "the sea-salt mode took up no water at all, so nothing was tested"
@@ -606,7 +653,17 @@ def test_ions_is_built_from_the_original_cl_not_the_depleted_pools():
     assert (np.asarray(clp[(1, -4)]) > 0.0).all(), "(1,-4) took nothing"
     exhausted = np.asarray(clp[(1, -2)])
     assert (exhausted == 0.0).all(), f"H+ was not fully consumed by (1,-4); got {exhausted}"
-    got = volume_mode.mdwat(tab, grid["nd"], want["md_out"], grid["rh"], fix_water_content=True)
+    got = volume_mode.mdwat(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
     np.testing.assert_array_equal(np.asarray(got), want["mdwat"])
 
 
@@ -645,7 +702,17 @@ def test_ions_is_a_strict_positivity_test_and_not_a_non_zero_test():
             assert (cl[:, wt.ion_slot(3)] > 0.0).any(), "cl(3) is not positive on the same row"
     assert saw_negative, "no negative cl(-2) reached the port; the mutation cannot be seen"
 
-    got = volume_mode.mdwat(tab, grid["nd"], want["md_out"], grid["rh"], fix_water_content=True)
+    got = volume_mode.mdwat(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
     np.testing.assert_array_equal(np.asarray(got), want["mdwat"])
 
 
@@ -791,7 +858,11 @@ def test_the_soluble_volumes_are_byte_equal_in_the_troposphere(setup, fix_water)
         want["md_out"],
         grid["rh"],
         want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
         fix_water_content=bool(fix_water),
+        fix_neg_pvol_wat=True,
     )
     for name, got, ref in (
         ("mdwat", mdwat, want["mdwat"]),
@@ -824,7 +895,16 @@ def test_pvol_is_the_only_conditionally_written_output():
     tab, grid = _trop_grid(setup)
     want = _reference(setup, _inputs(grid))
     _, _, _, pvol, _ = volume_mode.soluble_volumes(
-        tab, grid["nd"], want["md_out"], grid["rh"], want["dvol"], fix_water_content=True
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
     )
     outsiders = [
         (m, c) for m in _soluble_cols(tab) for c in range(tab.ncp) if not tab.component[m, c]
@@ -972,7 +1052,16 @@ def test_the_masked_divisions_keep_the_gradient_finite():
 
     def total(masses):
         _, wvol, rhopar, _, pvol_wat = volume_mode.soluble_volumes(
-            tab, nd, masses, np.array([0.6, 0.6]), dvol, fix_water_content=True
+            tab,
+            nd,
+            masses,
+            np.array([0.6, 0.6]),
+            dvol,
+            np.array([213.0, 213.0]),
+            np.array([1.0e5, 1.0e5]),
+            np.array([1.0e-2, 1.0e-2]),
+            fix_water_content=True,
+            fix_neg_pvol_wat=True,
         )
         return jnp.sum(wvol) + jnp.sum(rhopar) + jnp.sum(pvol_wat)
 
@@ -1084,7 +1173,16 @@ def test_mask_sol_and_mask_nosol_do_not_partition_mask():
         assert (np.asarray(want["pvol_wat"])[rows, m] == 0.0).all()
 
     _, _, _, pvol, _ = volume_mode.soluble_volumes(
-        tab, grid["nd"], want["md_out"], grid["rh"], want["dvol"], fix_water_content=True
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
     )
     cols = _soluble_cols(tab)
     np.testing.assert_array_equal(
@@ -1136,7 +1234,16 @@ def test_mask_nosol_is_reached_and_zeroes_the_soluble_pvol():
 
     cols = _soluble_cols(tab)
     _, wvol, rhopar, pvol, pvol_wat = volume_mode.soluble_volumes(
-        tab, grid["nd"], want["md_out"], grid["rh"], want["dvol"], fix_water_content=True
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
     )
     for name, got, ref in (
         ("wvol", wvol, want["wvol"]),
@@ -1227,3 +1334,314 @@ def test_the_wvol_accumulation_mask_is_only_observable_under_mask_sol():
             "nothing was accumulated before the discard, so the row shows nothing"
         )
     assert seen, "no mask_nosol row; the discard is untested"
+
+
+# ---------------------------------------------------------------------------
+# Task 43 -- the stratospheric branch
+# ---------------------------------------------------------------------------
+
+
+@functools.lru_cache(maxsize=16)
+def _strat_grid(setup: int):
+    """One call, `nbox = 60+`, with a MIXED `pmid` column.
+
+    That is the point of the fixture and not an optimisation. In the box model
+    `pmid` is a run-level scalar (`glomap_box_env_mod.F90:75`, `nbox = 1`), so a
+    one-pressure-per-call sweep cannot distinguish "the override is applied at
+    the points where it should be" from "the override is applied to the whole
+    call". A mixed column can.
+
+    No `negsu`/`negsol` row appears here. A negative `md(cp_su)` below `putls`
+    gives `mdwat = (100/wts - 1)*md_su*mm_su/mmw < 0` for any `wts <= 100`, and
+    with `l_fix_neg_pvol_wat` on the `:882-898` guard then aborts the call --
+    correctly, since a negative water mass is what it exists to catch. One such
+    row would void the whole comparison.
+    """
+    tab = modes.build(setup)
+    specs = [_spec(t=T_REF, pmid=pmid, s=S_REF, rh=rh) for pmid in PMID_AXIS for rh in (0.3, 0.9)]
+    # The wts > 99 corner, where l_fix_neg_pvol_wat is the difference between a
+    # positive and a negative stratospheric mdwat.
+    specs += [_spec(t=288.0, pmid=pmid, s=1.0e-8, rh=RH_REF) for pmid in PMID_AXIS]
+    specs += [_spec(t=t, pmid=P_STRAT, s=S_REF, rh=RH_REF) for t in T_AXIS]
+    specs += [_spec(t=303.65, pmid=P_STRAT, s=s, rh=RH_REF) for s in S_AXIS]
+    specs += [
+        _spec(t=T_REF, pmid=pmid, s=S_REF, rh=rh, variant=v)
+        for v in ("su_only", "cl_only", "nosol", "insol_rich", "tiny")
+        for pmid in (P_STRAT, PUTLS)
+        for rh in (0.3, 0.9)
+    ]
+    grid = _rows(tab, specs)
+    pmids = np.asarray(grid["pmid"])
+    assert PUTLS in pmids, "no row sits exactly on putls"
+    assert (pmids < PUTLS).any() and (pmids > PUTLS).any(), (
+        "the column is single-sided, so the override cannot be shown to be per point"
+    )
+    return tab, grid
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", SETUPS)
+@pytest.mark.parametrize("fix_neg", [0, 1], ids=["unclamped", "clamped"])
+def test_the_stratospheric_branch_is_byte_equal(setup, fix_neg):
+    """`mdwat`, `rhopar`, `pvol`, `pvol_wat` and `wvol` across `putls`.
+
+    Neither override has run in any validated trajectory -- the four shipped
+    namelists run `pressure` in {1e5, 2e4, 1e5, 1e5} and `putls` is 1.5e4 -- so
+    the compiled routine driven by a constructed pressure column is the only
+    reference these branches have ever had.
+    """
+    tab, grid = _strat_grid(setup)
+    want = _reference(setup, _inputs(grid), fix_neg=fix_neg)
+    cols = _soluble_cols(tab)
+    if not cols:
+        pytest.skip(f"setup {setup} has no active soluble mode")
+
+    mdwat, wvol, rhopar, pvol, pvol_wat = volume_mode.soluble_volumes(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=bool(fix_neg),
+    )
+    for name, got, ref in (
+        ("mdwat", mdwat, want["mdwat"]),
+        ("wvol", wvol, want["wvol"]),
+        ("rhopar", rhopar, want["rhopar"]),
+        ("pvol_wat", pvol_wat, want["pvol_wat"]),
+    ):
+        np.testing.assert_array_equal(
+            np.asarray(got)[:, cols], np.asarray(ref)[:, cols], err_msg=name
+        )
+    np.testing.assert_array_equal(
+        np.asarray(pvol)[:, cols, :], np.asarray(want["pvol"])[:, cols, :], err_msg="pvol"
+    )
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_putls_itself_takes_the_tropospheric_arm():
+    """`:434` and `:584` are `pmid < putls`, strict. `pmid == 1.5e4` exactly is
+    tropospheric, and its two neighbouring doubles fall on opposite sides.
+
+    Checked against the Fortran's own `mdwat`, not against the port: the row at
+    `nextafter(putls, 0)` must be overridden and the row at `putls` must not.
+    """
+    setup = 1
+    tab = modes.build(setup)
+    below, at, above = np.nextafter(PUTLS, 0.0), PUTLS, np.nextafter(PUTLS, np.inf)
+    specs = [_spec(t=T_REF, pmid=pm, s=S_REF, rh=RH_REF) for pm in (below, at, above)]
+    grid = _rows(tab, specs)
+    want = _reference(setup, _inputs(grid))
+
+    m = _soluble_cols(tab)[0]
+    mdwat = np.asarray(want["mdwat"])[:, m]
+    assert mdwat[1] == mdwat[2], "putls itself was overridden; the comparison at :434 is not strict"
+    assert mdwat[0] != mdwat[1], (
+        "the double below putls was NOT overridden, so the branch never fired "
+        "and the strictness check proves nothing"
+    )
+    assert np.asarray(volume_mode.stratospheric(np.array([below, at, above]))).tolist() == [
+        True,
+        False,
+        False,
+    ]
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_the_strat_override_is_applied_per_point():
+    """A mixed `pmid` column in ONE call, with the same composition on every row.
+
+    If the override were applied per call rather than per point, every row would
+    come back either overridden or not. This asserts both happen inside a single
+    `leaf_volume_mode` invocation -- something the box model cannot show,
+    because `pmid` there is a run-level scalar with `nbox = 1`.
+    """
+    setup = 1
+    tab = modes.build(setup)
+    specs = [_spec(t=T_REF, pmid=pm, s=S_REF, rh=RH_REF) for pm in PMID_AXIS]
+    grid = _rows(tab, specs)
+    want = _reference(setup, _inputs(grid))
+    assert len(specs) >= 3
+
+    m = _soluble_cols(tab)[0]
+    mdwat = np.asarray(want["mdwat"])[:, m]
+    strat = np.asarray(grid["pmid"]) < PUTLS
+    assert strat.any() and (~strat).any(), "the column is single-sided"
+    # Rows on the same side agree with each other; the two sides do not.
+    assert len(set(mdwat[~strat].tolist())) == 1, (
+        "tropospheric rows disagree although rh, t and composition are identical"
+    )
+    assert (mdwat[strat] != mdwat[~strat][0]).all(), (
+        "a stratospheric row matched the tropospheric value; the override did not fire per point"
+    )
+
+    got = volume_mode.mdwat(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
+    np.testing.assert_array_equal(np.asarray(got), want["mdwat"])
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_the_two_strat_overrides_use_different_masks():
+    """`:434` is under `mask`, `:584` under `mask_sol`. At a `mask_nosol` point
+    the water is overridden and the density is not.
+
+    **Unifying them is asymmetric, and only one direction is observable.**
+    Measured:
+
+    * moving the `mdwat` override to `mask_sol` -- **reddens**. At a
+      `mask_nosol` row the reference rebuilds `mdwat` from `wts` and the
+      mutation leaves the ZSR value.
+    * moving the `rhosol` override to `mask` -- **stays green**, on every
+      setup. `rhosol` is *read* only at `:593` and `:623`, both inside
+      `WHERE (mask_sol)`, so a value written at a `mask & ~mask_sol` point can
+      never reach an output. In the Fortran that point holds the previous
+      mode's uninitialised `rhosol`, which is the same statement.
+
+    So the acceptance criterion "unify them, it must fail on a mask_nosol row"
+    holds for `:434` and not for `:584`. This test asserts the masks are
+    genuinely different sets on the fixture, checks the port against the Fortran
+    on exactly those rows, and records the unobservable half rather than
+    claiming coverage of it.
+    """
+    setup = 2
+    tab = modes.build(setup)
+    specs = [
+        _spec(t=T_REF, pmid=pm, s=S_REF, rh=rh, variant="nosol")
+        for pm in (P_STRAT, P_TROP)
+        for rh in (0.3, 0.9)
+    ]
+    grid = _rows(tab, specs)
+    want = _reference(setup, _inputs(grid))
+
+    md = jnp.asarray(want["md_out"])
+    strat = np.asarray(volume_mode.stratospheric(grid["pmid"]))
+    seen = False
+    for m in _soluble_cols(tab):
+        mask = jnp.asarray(grid["nd"][:, m] > tab.num_eps[m])
+        mask_sol, mask_nosol = volume_mode.solubility_masks(
+            volume_mode.soluble_mass(tab, md, m, mask), mask
+        )
+        water_rows = np.asarray(mask) & strat
+        density_rows = np.asarray(mask_sol) & strat
+        if not (np.asarray(mask_nosol) & strat).any():
+            continue
+        seen = True
+        assert not np.array_equal(water_rows, density_rows), (
+            f"mode {m + 1}: the two override masks coincide on this fixture"
+        )
+    assert seen, "no mask_nosol row below putls; the two masks were never asked to differ"
+
+    cols = _soluble_cols(tab)
+    mdwat, _, rhopar, _, _ = volume_mode.soluble_volumes(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
+    np.testing.assert_array_equal(np.asarray(mdwat)[:, cols], np.asarray(want["mdwat"])[:, cols])
+    np.testing.assert_array_equal(np.asarray(rhopar)[:, cols], np.asarray(want["rhopar"])[:, cols])
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_the_negative_water_case_is_reachable_only_with_the_flag_off():
+    """`l_fix_neg_pvol_wat` changes the FAILURE MODE, not just a number.
+
+    With it off, `ukca_vapour.F90:188` has no 99% ceiling and `wts` reaches
+    103.8, so `(100.0/wts - 1.0)` is negative and the stratospheric `mdwat` with
+    it. The same flag disables the `:882-898` abort that would have caught that,
+    so the reference returns a negative water content in silence. **This port
+    reproduces the silence**; the omitted guard is recorded in
+    `test_the_diagnostic_ereport_blocks_are_omitted`.
+
+    With the flag on, `wts` is clamped to 99 and `100/99 - 1 > 0`, so the same
+    row is positive and the guard has nothing to fire on.
+    """
+    setup = 1
+    tab = modes.build(setup)
+    specs = [_spec(t=t, pmid=P_STRAT, s=1.0e-8, rh=RH_REF) for t in (288.0, 298.0, 303.65, 310.0)]
+    grid = _rows(tab, specs)
+
+    unclamped = _reference(setup, _inputs(grid), fix_neg=0)
+    clamped = _reference(setup, _inputs(grid), fix_neg=1)
+    cols = _soluble_cols(tab)
+    assert (np.asarray(unclamped["mdwat"])[:, cols] < 0.0).any(), (
+        "no row produced a negative mdwat with the flag off; wts never exceeded "
+        "100 and the case is not reached"
+    )
+    assert (np.asarray(clamped["mdwat"])[:, cols] >= 0.0).all(), (
+        "the clamped arm produced a negative mdwat, which the :884 guard should have aborted on"
+    )
+    assert not np.array_equal(
+        np.asarray(unclamped["mdwat"])[:, cols], np.asarray(clamped["mdwat"])[:, cols]
+    ), "the flag moved nothing; the both-settings comparison is vacuous"
+
+    for flag, want in ((0, unclamped), (1, clamped)):
+        got = volume_mode.mdwat(
+            tab,
+            grid["nd"],
+            want["md_out"],
+            grid["rh"],
+            grid["t"],
+            grid["pmid"],
+            grid["s"],
+            fix_water_content=True,
+            fix_neg_pvol_wat=bool(flag),
+        )
+        np.testing.assert_array_equal(np.asarray(got), want["mdwat"], err_msg=f"flag={flag}")
+
+
+def test_the_strat_water_forms_three_separate_statements():
+    """`:435-437`. `(md*mm(cp_su))/avogadro`, then `(100/wts - 1)*that`, then
+    `/mmwovravc` -- a division by a precomputed quotient, not a multiplication
+    by its reciprocal.
+
+    Compared as expressions, because each difference is in the last bit and no
+    input isolates one from the others. Each alternative is asserted to be a
+    genuinely different double first, so none of these checks can go vacuous.
+    """
+    tab = modes.build(1)
+    scales = volume_mode._Scales(tab)
+    rng = np.random.default_rng(437)
+    md = rng.uniform(1.0, 1e12, 200_000)
+    wts = rng.uniform(41.0, 103.0, 200_000)
+
+    massh2so4kg = (md * tab.mm[CP_SU]) / 6.022e23
+    masswaterkg = (100.0 / wts - 1.0) * massh2so4kg
+    faithful = masswaterkg / float(scales.mmwovravc)
+
+    alternatives = {
+        "mm_ovravc substituted": (100.0 / wts - 1.0)
+        * (md * float(np.asarray(scales.mm_ovravc)[CP_SU]))
+        / float(scales.mmwovravc),
+        "multiply by the reciprocal": masswaterkg * (1.0 / float(scales.mmwovravc)),
+        "one fraction": (100.0 - wts) / wts * massh2so4kg / float(scales.mmwovravc),
+    }
+    for label, other in alternatives.items():
+        assert (faithful != other).sum() > 0, (
+            f"'{label}' agrees with the faithful form on all 200,000 samples; "
+            "that check cannot fail"
+        )

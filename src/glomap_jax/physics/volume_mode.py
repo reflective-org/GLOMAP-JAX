@@ -11,9 +11,30 @@ whole ZSR chain. What is here so far is the path to it: the ion assembly at
 `:350-423`, the charge balance, the `ukca_water_content_v` call at `:429`, and
 the `WHERE (mask)` / `ELSE WHERE` pair that zeroes it outside the mask.
 
-**The stratospheric override at `:434-438` is deliberately not here** — it is
-task 43. Until then `mdwat` is byte-equal only for `pmid >= putls`, which is
-every row any shipped namelist has ever run.
+## Task 43 — the stratospheric branch, which has never executed
+
+`putls = 1.5e4` (`:258`) and the four shipped namelists run `pressure` in
+{1e5, 2e4, 1e5, 1e5}, so **neither override has run in any validated
+trajectory**. Two of them, under two different masks:
+
+* `:434-438`, under **`mask`**: throw the ZSR water content away and rebuild
+  `mdwat` from `wts`, the H2SO4 weight percent `ukca_vapour` returned.
+* `:584-586`, under **`mask_sol`**: replace the solution density with
+  `rhosol_strat`.
+
+Unifying the two masks changes `mdwat` at a `mask_nosol` point, where `mask` is
+true and `mask_sol` is not.
+
+The test is a strict `<`, so `pmid == 1.5e4` exactly is **tropospheric**. And
+the override is per point, not per call: the fixture uses `nbox > 1` with a
+mixed `pmid` column, which the box model cannot produce because `pmid` there is
+a run-level scalar (`glomap_box_env_mod.F90:75`, `nbox = 1`).
+
+`:435` writes `md*mm(cp_su)/avogadro` although `mm_ovravc(cp_su)` is in scope
+and is exactly that quotient. They are different doubles and the inline form is
+what is reproduced. `md(:,imode,cp_su)` is read **unconditionally** -- there is
+no `component` guard on it -- so a mass parked in a non-member `cp_su` slot
+reaches `mdwat` here.
 
 ## The three SO4 increments are applied in source order, and it is not `icp` order
 
@@ -80,6 +101,7 @@ from ..core import numerics
 from ..core.constants import AVOGADRO, MMW, RHO_SO4, RHO_WATER
 from . import water_tables as wt
 from .modes import NMODES, ModeTables
+from .vapour import vapour
 from .water_content import water_content
 
 __all__ = [
@@ -93,6 +115,7 @@ __all__ = [
     "FHYG_AOM",
     "MM_AGE_ORG",
     "MM_POM",
+    "PUTLS",
     "SETUP_SOLINSOL",
     "aged_organic_moles",
     "charge_balance",
@@ -102,6 +125,7 @@ __all__ = [
     "solubility_masks",
     "soluble_mass",
     "soluble_volumes",
+    "stratospheric",
 ]
 
 # ukca_mode_setup.F90:75-83, one-based as the Fortran writes them. Only these
@@ -123,6 +147,7 @@ CP_NH4 = 9
 FHYG_AOM = 0.65
 MM_AGE_ORG = 0.150
 MM_POM = 0.0168
+PUTLS = 1.5e4
 
 # ukca_config_specification_mod's i_solinsol_6mode. See the module docstring.
 SETUP_SOLINSOL = 11
@@ -235,6 +260,44 @@ def ion_concentrations(tables: ModeTables, md: Array, imode: int) -> Array:
     return cl.at[:, wt.ion_slot(1)].set(charge_balance(cl))
 
 
+def stratospheric(pmid: Array) -> Array:
+    """`pmid < putls` (`:434`, `:584`). Strict, so `putls` itself is FALSE."""
+    return jnp.asarray(pmid, dtype=jnp.float64) < PUTLS
+
+
+def _strat_mdwat(
+    tables: ModeTables,
+    md: Array,
+    imode: int,
+    mdwat_col: Array,
+    where: Array,
+    wts: Array,
+    scales,
+) -> Array:
+    """`:434-438`. `mdwat` rebuilt from the H2SO4 weight percent.
+
+    Three statements, each kept as written:
+
+        massh2so4kg = md(:,imode,cp_su)*mm(cp_su)/avogadro
+        masswaterkg = (100.0/wts - 1.0)*massh2so4kg
+        mdwat       = masswaterkg/mmwovravc
+
+    `mm(cp_su)/avogadro` is *not* replaced by the in-scope `mm_ovravc(cp_su)`,
+    and the last line divides by a precomputed quotient rather than multiplying
+    by `avogadro/mmw`.
+
+    With `l_fix_neg_pvol_wat` off, `wts` has no 99% ceiling and reaches 103.8,
+    so `100.0/wts - 1.0` goes **negative** and `mdwat` with it. The same flag
+    also disables the `:882-898` abort that would catch that, so flipping it
+    changes the failure mode rather than a number. This port reproduces the
+    silence: it returns the negative water content, and the omitted guard is
+    recorded in `test_volume_mode.py` rather than raised here.
+    """
+    massh2so4kg = (md[:, imode, CP_SU - 1] * tables.mm[CP_SU - 1]) / AVOGADRO
+    masswaterkg = (100.0 / wts - 1.0) * massh2so4kg
+    return jnp.where(where, masswaterkg / scales.mmwovravc, mdwat_col)
+
+
 def _soluble_mdwat(
     tables: ModeTables,
     md: Array,
@@ -261,19 +324,25 @@ def mdwat(
     nd: Array,
     md: Array,
     rh: Array,
+    t: Array,
+    pmid: Array,
+    s: Array,
     *,
     fix_water_content: bool,
+    fix_neg_pvol_wat: bool,
 ) -> Array:
     """`mdwat`, the water content in molecules per particle, shape `(nbox, nmodes)`.
 
-    Task 41: the soluble branch below `putls` only. An insoluble mode (`:641`)
-    and an absent mode (`:679`) both give exactly 0.0, which is already faithful;
-    the stratospheric override at `:434-438` is task 43 and is **not** applied,
-    so a `pmid < putls` row is not covered by this function.
+    The soluble branch's water content including the `:434-438` override. An
+    insoluble mode (`:641`) and an absent mode (`:679`) both give exactly 0.0,
+    which is already faithful, so this column is complete for every mode.
     """
     nd = jnp.asarray(nd, dtype=jnp.float64)
     md = jnp.asarray(md, dtype=jnp.float64)
     corrh = corrected_humidity(rh)
+    scales = _Scales(tables)
+    wts, _ = vapour(t, pmid, s, fix_neg_pvol_wat=fix_neg_pvol_wat)
+    strat = stratospheric(pmid)
     nbox = nd.shape[0]
 
     columns = []
@@ -283,9 +352,8 @@ def mdwat(
             continue
         # Strict `>`; the box seeds nd exactly at num_eps, so the tie is live.
         mask = nd[:, imode] > tables.num_eps[imode]
-        columns.append(
-            _soluble_mdwat(tables, md, imode, mask, corrh, fix_water_content=fix_water_content)
-        )
+        column = _soluble_mdwat(tables, md, imode, mask, corrh, fix_water_content=fix_water_content)
+        columns.append(_strat_mdwat(tables, md, imode, column, mask & strat, wts, scales))
     return jnp.stack(columns, axis=1)
 
 
@@ -396,15 +464,21 @@ def _soluble_mode(
     dvol: Array,
     corrh: Array,
     scales: _Scales,
+    strat: Array,
+    wts: Array,
+    rhosol_strat: Array,
     *,
     fix_water_content: bool,
 ) -> dict:
-    """One soluble mode, tropospheric (`:314-636`)."""
+    """One soluble mode (`:314-636`)."""
     mask = nd[:, imode] > tables.num_eps[imode]
     mdsol = soluble_mass(tables, md, imode, mask)
     mask_sol, mask_nosol = solubility_masks(mdsol, mask)
 
     mdwat_col = _soluble_mdwat(tables, md, imode, mask, corrh, fix_water_content=fix_water_content)
+    # `:434`, under `mask` -- and before the density accumulators, which read
+    # the overridden value.
+    mdwat_col = _strat_mdwat(tables, md, imode, mdwat_col, mask & strat, wts, scales)
     rhotmp, denom, rhotmp2, denom2 = _density_accumulators(
         tables, md, imode, mask, mdwat_col, scales
     )
@@ -416,6 +490,9 @@ def _soluble_mode(
     # `denom` is exactly 0.0 on the :447 ELSE WHERE, which is what makes the
     # guard load-bearing rather than defensive.
     rhosol = numerics.safe_divide(rhotmp, denom, mask_sol)
+    # `:584`, under `mask_sol` -- a DIFFERENT mask from `:434`'s. At a
+    # mask_nosol point the water is overridden and the density is not.
+    rhosol = jnp.where(mask_sol & strat, rhosol_strat, rhosol)
 
     dvol_col = dvol[:, imode]
     wvol = jnp.zeros(jnp.shape(mask), dtype=jnp.float64)
@@ -468,20 +545,33 @@ def soluble_volumes(
     md: Array,
     rh: Array,
     dvol: Array,
+    t: Array,
+    pmid: Array,
+    s: Array,
     *,
     fix_water_content: bool,
+    fix_neg_pvol_wat: bool,
 ) -> tuple[Array, Array, Array, Array, Array]:
     """`(mdwat, wvol, rhopar, pvol, pvol_wat)` for the **soluble** modes only.
 
-    Task 42, tropospheric. Columns for an insoluble mode (`:638`) or an absent
-    one (`:675`) are left at zero rather than guessed -- those branches are
-    task 44 -- so only `modesol == 1` columns are meaningful here.
+    Columns for an insoluble mode (`:638`) or an absent one (`:675`) are left at
+    zero rather than guessed -- those branches are task 44 -- so only
+    `modesol == 1` columns are meaningful here.
+
+    `t`, `pmid` and `s` enter for one purpose: the `ukca_vapour` call at `:287`,
+    whose two results are read only inside the two `pmid < putls` blocks. The
+    call is made once, outside the mode loop, exactly as `:288` does -- `wts`
+    and `rhosol_strat` are independent of particle size and composition.
     """
     nd = jnp.asarray(nd, dtype=jnp.float64)
     md = jnp.asarray(md, dtype=jnp.float64)
     dvol = jnp.asarray(dvol, dtype=jnp.float64)
     corrh = corrected_humidity(rh)
     scales = _Scales(tables)
+    # `:286`: rp is a dummy 100.0e-9 and reaches no output of ukca_vapour, so
+    # the port does not pass it -- see physics/vapour.py.
+    wts, rhosol_strat = vapour(t, pmid, s, fix_neg_pvol_wat=fix_neg_pvol_wat)
+    strat = stratospheric(pmid)
     nbox = nd.shape[0]
     zero = jnp.zeros((nbox,), dtype=jnp.float64)
 
@@ -495,7 +585,17 @@ def soluble_volumes(
             pvol_wat_cols.append(zero)
             continue
         out = _soluble_mode(
-            tables, imode, nd, md, dvol, corrh, scales, fix_water_content=fix_water_content
+            tables,
+            imode,
+            nd,
+            md,
+            dvol,
+            corrh,
+            scales,
+            strat,
+            wts,
+            rhosol_strat,
+            fix_water_content=fix_water_content,
         )
         mdwat_cols.append(out["mdwat"])
         wvol_cols.append(out["wvol"])
