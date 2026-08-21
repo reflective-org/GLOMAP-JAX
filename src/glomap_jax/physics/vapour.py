@@ -89,7 +89,12 @@ def water_vapour_pressure(pmid: Array, s: Array) -> Array:
     The floor is what protects the `LOG` at `:149`: `s` can be zero or negative
     in a constructed fixture, and `1.609*s*patm` would then be non-positive.
     """
-    patm = pmid / P0
+    # `:136` writes `patm = pmid(jl)/p0`, a division. numerics.true_divide,
+    # because XLA turns `x / constant` into `x * (1/constant)` and 1/101325 is
+    # inexact -- 28,534 of 200,000 sample values move. Inert today (`wts` comes
+    # out bit-identical through the LOG and the quadratic) and one ulp from
+    # live.
+    patm = numerics.true_divide(pmid, P0)
     bh2o = 1.609 * s * patm
     bh2o = jnp.where(bh2o < BMINATM, BMINATM, bh2o)
     return jnp.where(bh2o > BMAXATM, BMAXATM, bh2o)

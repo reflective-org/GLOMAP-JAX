@@ -176,7 +176,12 @@ def vapour_round(x: Array) -> Array:
     the composition is what has to be right: the result indexes a lookup table,
     so a tie that rounds the other way selects a different entry.
     """
-    return nint(x / 5.0) * 5.0
+    # true_divide, not `/`: XLA rewrites division by a scalar constant into a
+    # multiply by its reciprocal, and 1/5 is inexact. Currently inert -- the
+    # rounded result is bit-identical over a 200,000-point sweep either way --
+    # but "inert on the sweep tested" is exactly the reasoning that let a
+    # different one-ulp defect through task 40, and the site is a table index.
+    return nint(true_divide(x, 5.0)) * 5.0
 
 
 def true_divide(numerator: Array, denominator) -> Array:
