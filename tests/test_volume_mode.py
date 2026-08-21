@@ -23,6 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 import pytest
@@ -930,12 +931,14 @@ def test_the_accumulation_seeds_water_first_then_ascending_icp():
       that is the whole content of "seed with water".
     * `(((t0+t1)+...)+water)`, water last -- **different**.
     * `jnp.sum` over a stack of `(water, t0, t1, ...)` -- **the same double**.
-      XLA's reduce over an axis is left-associated: 0 of 20,000 differences for
-      axis lengths 3 to 32, diverging only at 64 (69% of points), while
-      `numpy`'s pairwise summation starts diverging at 8. With `ncp = 6` plus
-      water, no fold in this routine is long enough for a reduction to
-      associate differently -- so "use a reduction" is not the live hazard here,
-      and a test claiming to catch it could not fail.
+      XLA's reduce over the leading axis is left-associated at every length this
+      routine uses: 0 of 20,000 differences for axis lengths 2 to 7 on both
+      interpreters this port has been run against. Where it stops being so is
+      version-dependent -- jax 0.9.2 departs at 64, jax 0.11.0 does not depart
+      by 512 -- so `test_a_short_jnp_sum_reproduces_the_ordered_fold` asserts
+      only the lengths in play and reports the crossover. With `ncp = 6` plus
+      water, "use a reduction" is not the live hazard here, and a test claiming
+      to catch it could not fail.
     """
     setup = 8
     tab, grid = _trop_grid(setup)
@@ -976,28 +979,60 @@ def test_the_accumulation_seeds_water_first_then_ascending_icp():
     )
 
 
-def test_a_short_jnp_sum_is_left_associated_and_a_long_one_is_not():
+def test_a_short_jnp_sum_reproduces_the_ordered_fold():
     """Recorded because the phase-D hazard list says reductions break an ordered
     fold, and at the lengths this routine uses they do not.
 
-    Measured on this build: `jnp.sum` over an axis of length 7 or 32 gives the
-    same double as the left-associated fold on every one of 20,000 samples, and
-    diverges at 64. `ncp` is 6 in every supported setup, so the ordered folds in
-    this port are written out for faithfulness and documentation -- not because
-    a reduction would currently give a different answer.
+    `ncp` is 6 in every supported setup, so the longest fold in
+    `ukca_volume_mode` is six components plus water. Over an axis that short,
+    `jnp.sum` gives the same double as the left-associated fold on every one of
+    20,000 samples -- on both interpreters this port has been run against. The
+    ordered folds in the port are therefore written out for faithfulness and
+    documentation, not because a reduction would currently give a different
+    answer.
+
+    Where the two *do* part company is version-dependent, which is why nothing
+    here pins a crossover. Measured over an axis of length 7 to 512, summing
+    along axis 0:
+
+    * jax 0.9.2 -- identical to 32, then 13,764 of
+      20,000 differ at 64 and it grows with length.
+    * jax 0.11.0 -- identical at every length tested, to 512.
+
+    So a reduction is safe here by measurement on this interpreter, not by
+    construction. The crossover is reported rather than asserted.
     """
     rng = np.random.default_rng(14)
-    for n, expect_same in ((7, True), (32, True), (64, False)):
+    longest = max(modes.build(s).ncp for s in SETUPS) + 1
+    assert longest <= 8, f"ncp has grown; the longest fold is now {longest} terms"
+    for n in range(2, longest + 1):
         a = rng.uniform(1e-25, 1e-18, (n, 20_000))
         fold = a[0].copy()
         for row in a[1:]:
             fold = fold + row
-        same = np.array_equal(np.asarray(jnp.sum(jnp.asarray(a), axis=0)), fold)
-        assert same is expect_same, (
-            f"jnp.sum over {n} terms is now "
-            f"{'not left-associated' if expect_same else 'left-associated'}; "
-            "the reduction hazard has moved"
+        np.testing.assert_array_equal(
+            np.asarray(jnp.sum(jnp.asarray(a), axis=0)),
+            fold,
+            err_msg=(
+                f"jnp.sum over {n} terms is no longer left-associated on "
+                f"jax {jax.__version__}; the reduction hazard has become live "
+                "at a length this routine actually uses"
+            ),
         )
+
+    crossover = None
+    for n in (16, 32, 64, 128, 256, 512):
+        a = rng.uniform(1e-25, 1e-18, (n, 20_000))
+        fold = a[0].copy()
+        for row in a[1:]:
+            fold = fold + row
+        if not np.array_equal(np.asarray(jnp.sum(jnp.asarray(a), axis=0)), fold):
+            crossover = n
+            break
+    print(
+        f"\njax {jax.__version__}: jnp.sum over axis 0 first departs from the "
+        f"ordered fold at n = {crossover if crossover else '>512 (never)'}"
+    )
 
 
 def test_the_where_construct_executes_in_order():
@@ -2383,40 +2418,144 @@ def test_mm_ovravcrhocp_is_unobservable_through_the_outputs():
     )
 
 
-def test_the_cube_root_spelling_is_not_observable_on_this_jax():
-    """`wetdp` goes through `numerics.cbrt`, i.e. `x ** (1.0/3.0)` -- and on
-    this build that cannot be distinguished from `jnp.cbrt`.
+@needs_binding
+@pytest.mark.fortran
+def test_the_fixture_distinguishes_the_cube_root_spelling():
+    """`wetdp` goes through `numerics.cbrt`, i.e. `x ** (1.0/3.0)` -- and this
+    fixture is asked to show that it matters.
 
-    Measured here: substituting `jnp.cbrt` in `wet_diameter` leaves every
-    byte-equality test in this file green, and over 800,000 samples spanning
-    1e-32 to 1e3 the two agree on every point. That is a property of the
-    installed XLA, not of the port -- `tests/test_numerics.py`'s
-    `test_how_far_jnp_cbrt_is_from_the_faithful_form_on_this_jax` records the
-    same thing, and on jax 0.11.0 the two disagree on 94% of its grid by up to
-    1.3e-14.
+    Whether it *can* is interpreter-dependent, so this measures rather than
+    assumes. `jnp.cbrt` and `x**(1.0/3.0)` are bit-identical on jax 0.9.2 over
+    800,000 samples, and differ on jax 0.11.0 -- the same split
+    `tests/test_numerics.py::test_how_far_jnp_cbrt_is_from_the_faithful_form_on_this_jax`
+    records. On the canonical interpreter (`.venv`, `Makefile:18`) they differ,
+    the fixture's own `sixovrpix*wvol` values reach a disagreement, and
+    substituting `jnp.cbrt` in `wet_diameter` reddens the byte-equality gate --
+    measured.
 
-    So the rule stands on the numerics module's measurement, not on this
-    fixture, and `wetdp`'s fidelity to `cubrt_v` here is pinned by byte equality
-    against the compiled routine rather than by the spelling. This test exists
-    so nobody later reads task 45's green suite as evidence that `jnp.cbrt`
-    would have been caught.
+    Where they agree the substitution is vacuous, and the test says so instead
+    of implying the green suite proved something.
     """
-    rng = np.random.default_rng(696)
-    samples = np.concatenate(
-        [
-            rng.uniform(1.0e-32, 1.0e-16, 200_000),
-            np.exp(rng.uniform(np.log(1.0e-32), np.log(1.0e-15), 200_000)),
-        ]
+    differing = 0
+    total = 0
+    for setup in SETUPS:
+        for grid_name in ("trop", "strat"):
+            tab, grid = (_trop_grid if grid_name == "trop" else _strat_grid)(setup)
+            want = _reference(setup, _inputs(grid))
+            tmp1 = np.asarray(volume_mode.six_over_pi_x(tab.x))[None, :] * np.asarray(want["wvol"])
+            faithful = np.asarray(jnp.asarray(tmp1) ** (1.0 / 3.0))
+            other = np.asarray(jnp.cbrt(jnp.asarray(tmp1)))
+            differing += int((faithful != other).sum())
+            total += faithful.size
+
+    generally_differ = not np.array_equal(
+        np.asarray(jnp.asarray(np.exp(np.linspace(-70.0, -34.0, 20_000))) ** (1.0 / 3.0)),
+        np.asarray(jnp.cbrt(jnp.asarray(np.exp(np.linspace(-70.0, -34.0, 20_000))))),
     )
-    faithful = np.asarray(jnp.asarray(samples) ** (1.0 / 3.0))
-    other = np.asarray(jnp.cbrt(jnp.asarray(samples)))
-    differ = int((faithful != other).sum())
-    if differ:
+    if not generally_differ:
+        assert differing == 0
         pytest.skip(
-            f"jnp.cbrt now differs from x**(1/3) on {differ} of {len(samples)} "
-            "samples; this test's premise no longer holds and the wetdp fixture "
-            "should be extended to reach a disagreement"
+            f"jax {jax.__version__}: jnp.cbrt is bit-identical to x**(1.0/3.0), so no "
+            "fixture can distinguish them. The rule rests on tests/test_numerics.py."
         )
-    # Only reachable when they agree: state the consequence rather than leaving
-    # it to be inferred.
-    assert differ == 0
+    assert differing > 0, (
+        f"jax {jax.__version__}: jnp.cbrt differs from x**(1.0/3.0) in general but on "
+        f"none of this fixture's {total} wetdp inputs, so a port using the forbidden "
+        "cube root would pass the byte-equality gate. Widen the wvol range."
+    )
+
+
+# ---------------------------------------------------------------------------
+# The divide-by-constant rewrite, which cost this module its byte equality once
+# ---------------------------------------------------------------------------
+
+
+def test_dividing_an_array_by_a_scalar_constant_is_a_true_divide():
+    """`numerics.true_divide`, and why every array-by-constant division uses it.
+
+    XLA rewrites `divide(x, broadcast(c))` into `multiply(x, broadcast(1/c))`
+    for **any** scalar constant, not only powers of two, and `1/c` is inexact
+    for every constant this routine divides by. Whether the rewrite happens
+    eagerly depends on the JAX version, so this test asserts the invariant that
+    holds on both -- `true_divide` reproduces a true division -- and *reports*
+    whether the plain spelling does.
+
+    This is not hypothetical. The module was first validated byte-equal on jax
+    0.9.2, where `x / c` is a true divide, and produced **73 failures at 1-2
+    ulp** on jax 0.11.0, where it is not. The canonical interpreter is `.venv`
+    (`Makefile:18`).
+    """
+    from glomap_jax.core import numerics as num
+
+    rng = np.random.default_rng(2049)
+    y = rng.uniform(1.0e5, 1.0e15, 200_000)
+    jy = jnp.asarray(y)
+    divisors = {
+        "f_ao": volume_mode.aged_organic_moles(),
+        "avogadro": 6.022e23,
+        "mmwovravc": 0.0180154 / 6.022e23,
+    }
+    rewritten = {}
+    for name, c in divisors.items():
+        want = y / c  # numpy: a true division, which is what gfortran does
+        np.testing.assert_array_equal(
+            np.asarray(num.true_divide(jy, c)),
+            want,
+            err_msg=f"true_divide is not a true divide for {name}",
+        )
+        rewritten[name] = int((np.asarray(jy / c) != want).sum())
+        # And the reciprocal-multiply really is a different number, so the
+        # helper is doing work rather than spelling the same thing twice.
+        assert (np.asarray(jy * (1.0 / c)) != want).sum() > 0, (
+            f"{name}: multiplying by the reciprocal now agrees with dividing, so "
+            "this test cannot fail"
+        )
+    print(f"\njax {jax.__version__}: plain `x / c` departs from a true divide on {rewritten}")
+
+
+def test_the_port_never_divides_an_array_by_a_bare_scalar_constant():
+    """A source check, because the failure mode is invisible at review.
+
+    `x / AVOGADRO` and `numerics.true_divide(x, AVOGADRO)` read identically and
+    differ by 1 ulp on the canonical interpreter. Every array-by-constant site
+    in the module -- `:368`, `:372`/`:381`, `:396-398`, `:435`, `:437` and
+    `:294` -- must go through the helper, so this greps for the bare form.
+
+    `1.0/(x*piovrsix)` and `100.0/wts` are exempt and are matched out: their
+    numerator is the constant, so there is no constant divisor to fold.
+
+    **Three of the seven sites are guarded by this grep alone.** Reverting
+    `:368`, `:396-398` or `:294` to the bare form leaves every byte-equality
+    test in this file green -- measured -- because the reciprocal-multiply and
+    the true divide happen to agree on the `md` values this fixture carries
+    (`avogadro`'s reciprocal differs on only ~3% of random doubles). Reverting
+    `:372`/`:381`, `:435` or `:437` reddens the byte-equality gate directly.
+    So this test is not belt-and-braces; for half the sites it is the only
+    thing standing between the port and a silent 1 ulp.
+    """
+    module = (REPO / "src" / "glomap_jax" / "physics" / "volume_mode.py").read_text(
+        encoding="utf-8"
+    )
+    body = module[module.index("CP_SU = 1") :]
+    # Scalar-by-scalar arithmetic is exempt: it happens in Python, not XLA, so
+    # there is no operand for the simplifier to fold. `MMW / AVOGADRO` at `:295`
+    # is the only such site.
+    exempt = ("self.mmwovravc = MMW / AVOGADRO",)
+    offenders = [
+        line.strip()
+        for line in body.splitlines()
+        if re.search(r"/\s*(AVOGADRO|f_ao|MMW|scales\.mmwovravc)\b", line)
+        and "true_divide" not in line
+        and not line.lstrip().startswith("#")
+        and '"""' not in line
+        and not line.lstrip().startswith("`")
+        and line.strip() not in exempt
+    ]
+    assert not offenders, (
+        "an array is divided by a bare scalar constant, which XLA rewrites into "
+        f"a reciprocal multiply on the canonical interpreter: {offenders}"
+    )
+    assert body.count("numerics.true_divide(") == 7, (
+        f"expected seven true_divide sites, found {body.count('numerics.true_divide(')}; "
+        "if a division was added or removed, re-derive the list in the docstring"
+    )

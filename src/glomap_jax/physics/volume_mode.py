@@ -4,6 +4,22 @@ The widest leaf in phase D: it consumes `ukca_vapour` and `ukca_water_content_v`
 turns `(nd, md, rh, t, pmid, s)` into the wet particle, and its `wetdp`/`wvol`/
 `rhopar` feed `ukca_conden`, `ukca_ageing` and the coagulation kernel.
 
+## Every array-by-constant division goes through `numerics.true_divide`
+
+`ukca_volume_mode` divides an array by a scalar constant at five places --
+`:368`, `:372`/`:381`, `:396-398`, `:435`, `:437` -- plus `:294`'s `mm_ovravc`,
+which is seven call sites here because `:396-398` is two divisions.
+XLA rewrites `divide(x, broadcast(c))` into `multiply(x, broadcast(1/c))` for
+**any** scalar constant, and `1/c` is inexact for every constant here, so the
+plain spelling is a different double from the division gfortran performs.
+
+Whether the rewrite happens eagerly depends on the JAX version: jax 0.9.2 emits
+a true divide and **jax 0.11.0 does not**. That is not a hypothetical -- this
+module was first validated byte-equal on 0.9.2 and produced 73 failures at 1-2
+ulp on 0.11.0, which is the repository's canonical interpreter
+(`Makefile:18`, `.venv`). See `core.numerics.true_divide` for the counts and for
+why `jnp.asarray(c)` and `lax.optimization_barrier` do not help.
+
 ## Task 41 — the soluble branch's water content
 
 `mdwat` is the first output the routine produces and the only one that needs the
@@ -265,7 +281,7 @@ def _hygroscopic_increment(md_cp: Array, f_ao: float) -> Array:
     Two quotients, then one product. Written out because
     `fhyg_aom*md/(avogadro*f_ao)` is a different double.
     """
-    return (FHYG_AOM / AVOGADRO) * (md_cp / f_ao)
+    return (FHYG_AOM / AVOGADRO) * numerics.true_divide(md_cp, f_ao)
 
 
 def charge_balance(cl: Array) -> Array:
@@ -311,7 +327,7 @@ def ion_concentrations(tables: ModeTables, md: Array, imode: int) -> Array:
     # Source order, not icp order: cp_su assigns, then cp_so and cp_oc
     # increment. Indices 1, 6, 3.
     if component[imode, CP_SU - 1]:
-        slots[wt.ion_slot(-2)] = md[:, imode, CP_SU - 1] / AVOGADRO
+        slots[wt.ion_slot(-2)] = numerics.true_divide(md[:, imode, CP_SU - 1], AVOGADRO)
     if component[imode, CP_SO - 1]:
         slots[wt.ion_slot(-2)] = slots[wt.ion_slot(-2)] + _hygroscopic_increment(
             md[:, imode, CP_SO - 1], f_ao
@@ -323,8 +339,8 @@ def ion_concentrations(tables: ModeTables, md: Array, imode: int) -> Array:
     if component[imode, CP_CL - 1]:
         # Complete dissociation: Na+ and Cl- are the same double, which is what
         # makes a sulfate-free sea-salt mode cancel exactly in charge_balance.
-        slots[wt.ion_slot(3)] = md[:, imode, CP_CL - 1] / AVOGADRO
-        slots[wt.ion_slot(-4)] = md[:, imode, CP_CL - 1] / AVOGADRO
+        slots[wt.ion_slot(3)] = numerics.true_divide(md[:, imode, CP_CL - 1], AVOGADRO)
+        slots[wt.ion_slot(-4)] = numerics.true_divide(md[:, imode, CP_CL - 1], AVOGADRO)
 
     if tables.ncp >= CP_NO3:
         # `:402`, dead in every supported setup (ncp = 6, cp_no3 = 7). Kept as
@@ -371,9 +387,9 @@ def _strat_mdwat(
     silence: it returns the negative water content, and the omitted guard is
     recorded in `test_volume_mode.py` rather than raised here.
     """
-    massh2so4kg = (md[:, imode, CP_SU - 1] * tables.mm[CP_SU - 1]) / AVOGADRO
+    massh2so4kg = numerics.true_divide(md[:, imode, CP_SU - 1] * tables.mm[CP_SU - 1], AVOGADRO)
     masswaterkg = (100.0 / wts - 1.0) * massh2so4kg
-    return jnp.where(where, masswaterkg / scales.mmwovravc, mdwat_col)
+    return jnp.where(where, numerics.true_divide(masswaterkg, scales.mmwovravc), mdwat_col)
 
 
 def _soluble_mdwat(
@@ -484,7 +500,7 @@ class _Scales:
     def __init__(self, tables: ModeTables):
         mm = jnp.asarray(tables.mm[: tables.ncp], dtype=jnp.float64)
         rhocomp = jnp.asarray(tables.rhocomp[: tables.ncp], dtype=jnp.float64)
-        self.mm_ovravc = mm / AVOGADRO
+        self.mm_ovravc = numerics.true_divide(mm, AVOGADRO)
         self.mmwovravc = MMW / AVOGADRO
         self.mm_ovravcrhocp = self.mm_ovravc / rhocomp
         self.mm_rhocp = mm * rhocomp
