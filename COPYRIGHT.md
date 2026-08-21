@@ -8,6 +8,10 @@ distribution-facing summary; this file is the map.
 Copyright (c) 2026 Reflective, released under the **Apache License 2.0**
 (`LICENCE`).
 
+Exception: the Fortran under `validation/` — the f2py shim modules in
+`validation/f2py/` and the overlay patches in `validation/patches/` — is
+BSD 3-Clause, per its file headers; see below.
+
 The port is written from the vendored Fortran — the repo's own rule is "port
 from the code, not the comments" — so it is treated as a derivative work of
 the BSD-licensed source, and every distribution of it (source or wheel)
@@ -28,10 +32,11 @@ file retains its original copyright header. The GLOMAP science routines
 additionally carry `(c) [University of Leeds] [2008]`, licensed to the Met
 Office under the UKCA collaboration agreement.
 
-`fortran/src/box/` and the overlay extensions in `validation/patches/` are
-new code, Copyright (c) 2026 Reflective, kept under the **same BSD 3-Clause
-licence** deliberately: the box driver stays comparable with `glomap-box`,
-and overlays are drafted for upstreaming there.
+`fortran/src/box/`, the overlay extensions in `validation/patches/`, and the
+f2py shims in `validation/f2py/` are new code, Copyright (c) 2026 Reflective,
+kept under the **same BSD 3-Clause licence** deliberately: the box driver
+stays comparable with `glomap-box`, and the Fortran-side extensions are
+drafted for upstreaming there.
 
 See `PROVENANCE.md` for the exact upstream commit and the file-by-file origin.
 
