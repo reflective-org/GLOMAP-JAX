@@ -115,6 +115,47 @@ The inactive branch's `pvol` default at `:686` is **dead code**.
 implies `mode`, while `:686` sits inside `ELSE` on `mode(imode)`. Reproduced and
 asserted dead rather than dropped or "fixed".
 
+## Task 45 — `wetdp`, and the three diagnostic blocks
+
+`:292-293` writes
+
+    piovrsix     = pi/6.0
+    sixovrpix(:) = 1.0/(x(:)*piovrsix)
+
+while `ukca_calc_drydiam.F90:230` writes `6.0/(pi*x(imode))` from the **same**
+`x` array. The two are algebraically identical and 2 ulp apart for sigma_g = 2.0
+and 1.8, and the cube root downstream turns that into a different double on
+53.2% (mode 4), 53.3% (mode 7) and 64.5% (mode 8) of sampled volumes. So the two
+spellings are kept in the two modules and must never be factored into a shared
+helper.
+
+`cubrt_v` at `:696` is called on `nmodes*nbox` elements, i.e. the whole array by
+sequence association, and `:698` then *discards* the result for inactive modes
+and copies `drydp` in. So `wetdp` for an absent mode is `drydp` bit for bit, not
+a cube root of anything.
+
+**The three `ereport` blocks are not ported**, and the reasons differ:
+
+* `:476-575`, `denom <= 0` or `denom2 <= 0` under `mask_sol`. A diagnostic:
+  it prints and aborts, and computes nothing that reaches an output.
+* `:703-880`, the five-way `MINVAL(wetdp/drydp/wvol/dvol/rhopar) <= 0` guard.
+  **Unreachable**, not merely unreached: the `WRITE` at `:856-876` formats
+  `'(5(A,E15.6,A,I0),A)'` into a `CHARACTER(LEN=errormessagelength)` buffer,
+  overruns it, and gfortran raises "Fortran runtime error: End of record" and
+  kills the process at `:876` -- before `ereport` at `:877` ever runs. So there
+  is no reference behaviour to reproduce; there is only a crash. Recorded, not
+  built a fixture for.
+* `:882-898`, `MINVAL(pvol_wat) < 0` or `MINVAL(mdwat) < 0`. This one is
+  **always active in the box**: `l_glomap_clim_radaer` is a
+  `LOGICAL, PARAMETER, .FALSE.` (`ukca_um_legacy_mod.F90:141`), so the
+  disjunction at `:882` reduces to `l_fix_neg_pvol_wat`, and
+  `glomap_box_config_mod.F90:323` pins that `.TRUE.`. Omitting it means the
+  port silently accepts a negative `mdwat` where the reference dies. The port
+  reproduces the *computation* and not the abort; the omission is asserted in
+  `test_the_diagnostic_ereport_blocks_are_omitted` rather than left implicit.
+  Note that if it were implemented, gfortran's `MINVAL` **skips** `NaN` while
+  `jnp.min` propagates, so it would need `nanmin` semantics.
+
 ## `mdcopy` and setup 11
 
 `:295` copies `md` into `mdcopy`, and `:356-364` overwrites three of its
@@ -132,7 +173,7 @@ import jax.numpy as jnp
 from jax import Array
 
 from ..core import numerics
-from ..core.constants import AVOGADRO, MMW, RHO_SO4, RHO_WATER
+from ..core.constants import AVOGADRO, MMW, PI, RHO_SO4, RHO_WATER
 from . import water_tables as wt
 from .modes import NMODES, ModeTables
 from .vapour import vapour
@@ -157,9 +198,12 @@ __all__ = [
     "ion_concentrations",
     "mdwat",
     "partial_volumes",
+    "six_over_pi_x",
     "solubility_masks",
     "soluble_mass",
     "stratospheric",
+    "volume_mode",
+    "wet_diameter",
 ]
 
 # ukca_mode_setup.F90:75-83, one-based as the Fortran writes them. Only these
@@ -717,3 +761,81 @@ def partial_volumes(
         pvol,
         jnp.stack(pvol_wat_cols, axis=1),
     )
+
+
+# ---------------------------------------------------------------------------
+# Task 45 -- wetdp, and the whole routine
+# ---------------------------------------------------------------------------
+
+
+def six_over_pi_x(x: Array) -> Array:
+    """`sixovrpix = 1.0/(x*(pi/6.0))` (`:292-293`).
+
+    **Not** `drydiam.six_over_pi_x`, which is `6.0/(pi*x)` from `:230` of the
+    other routine. Same `x`, 2 ulp apart for two of the width parameters, and
+    the cube root turns that into a different `wetdp` on more than half the
+    domain. Never factor the two into one helper.
+    """
+    piovrsix = PI / 6.0
+    return 1.0 / (jnp.asarray(x, dtype=jnp.float64) * piovrsix)
+
+
+def wet_diameter(tables: ModeTables, wvol: Array, drydp: Array) -> Array:
+    """`wetdp` (`:694-700`).
+
+    `cubrt_v` runs over the whole `(nbox, nmodes)` array -- `:696` passes
+    `nmodes*nbox` and relies on sequence association -- and `:698` then
+    overwrites the inactive columns with `drydp`. Reproduced in that order: the
+    cube root is taken everywhere and thrown away where the mode is absent.
+    """
+    sixovrpix = six_over_pi_x(tables.x)
+    tmp1 = sixovrpix[None, :] * jnp.asarray(wvol, dtype=jnp.float64)
+    wetdp = numerics.cbrt(tmp1)
+    drydp = jnp.asarray(drydp, dtype=jnp.float64)
+    for imode in range(NMODES):
+        if not bool(tables.mode[imode]):
+            wetdp = wetdp.at[:, imode].set(drydp[:, imode])
+    return wetdp
+
+
+def volume_mode(
+    tables: ModeTables,
+    nd: Array,
+    md: Array,
+    mdt: Array,
+    rh: Array,
+    dvol: Array,
+    drydp: Array,
+    t: Array,
+    pmid: Array,
+    s: Array,
+    *,
+    fix_water_content: bool,
+    fix_neg_pvol_wat: bool,
+) -> tuple[Array, Array, Array, Array, Array, Array]:
+    """`(mdwat, wvol, wetdp, rhopar, pvol, pvol_wat)`, in the Fortran's order.
+
+    `mdt` is accepted and not used, exactly as the reference uses it: its only
+    reader in this routine is the diagnostic `WRITE` at `:842`, inside the
+    unreachable five-way block. It is in the signature so a caller cannot pass
+    the arguments in the wrong order without noticing, and so the omission is
+    visible here rather than inferred.
+
+    None of the three `ereport` blocks is ported; see the module docstring for
+    which, and why each.
+    """
+    del mdt  # `:842` only, inside the block that cannot run. See the docstring.
+    mdwat_, wvol_, rhopar_, pvol_, pvol_wat_ = partial_volumes(
+        tables,
+        nd,
+        md,
+        rh,
+        dvol,
+        t,
+        pmid,
+        s,
+        fix_water_content=fix_water_content,
+        fix_neg_pvol_wat=fix_neg_pvol_wat,
+    )
+    wetdp_ = wet_diameter(tables, wvol_, drydp)
+    return mdwat_, wvol_, wetdp_, rhopar_, pvol_, pvol_wat_

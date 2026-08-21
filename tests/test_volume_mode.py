@@ -1956,3 +1956,467 @@ def test_the_insoluble_accumulator_mask_is_not_observable(setup):
             f"mode {m + 1}: every masked row is also 1769, so the :665 guard is untested here"
         )
     assert seen, "no masked-out insoluble row on this fixture"
+
+
+# ---------------------------------------------------------------------------
+# Task 45 -- wetdp, and the whole routine
+# ---------------------------------------------------------------------------
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", SETUPS)
+@pytest.mark.parametrize("grid_name", ["trop", "strat"])
+@pytest.mark.parametrize("fix_water", [0, 1], ids=["unfixed", "fixed"])
+@pytest.mark.parametrize("fix_neg", [0, 1], ids=["unclamped", "clamped"])
+def test_the_whole_routine_is_byte_equal(setup, grid_name, fix_water, fix_neg):
+    """All six outputs, all eight modes, both grids, both flags.
+
+    This is the gate the four preceding tasks were building towards: one call to
+    `volume_mode` against one call to `leaf_volume_mode`, compared with
+    `assert_array_equal`.
+    """
+    tab, grid = (_trop_grid if grid_name == "trop" else _strat_grid)(setup)
+    want = _reference(setup, _inputs(grid), fix_water=fix_water, fix_neg=fix_neg)
+    mdwat, wvol, wetdp, rhopar, pvol, pvol_wat = volume_mode.volume_mode(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        want["mdt_out"],
+        grid["rh"],
+        want["dvol"],
+        want["drydp"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=bool(fix_water),
+        fix_neg_pvol_wat=bool(fix_neg),
+    )
+    for name, got in (
+        ("mdwat", mdwat),
+        ("wvol", wvol),
+        ("wetdp", wetdp),
+        ("rhopar", rhopar),
+        ("pvol", pvol),
+        ("pvol_wat", pvol_wat),
+    ):
+        np.testing.assert_array_equal(np.asarray(got), np.asarray(want[name]), err_msg=name)
+
+
+def test_wetdp_uses_the_volume_mode_spelling_of_sixovrpix():
+    """`1.0/(x*(pi/6.0))` (`:292-293`), not `drydiam`'s `6.0/(pi*x)` (`:230`).
+
+    The two are 2 ulp apart for two of the width parameters and the cube root
+    amplifies that: measured here over 200,000 random `wvol` in [1e-19, 1e-15],
+    the two spellings give different `wetdp` on more than half the samples for
+    mode 4, which is active in six of the seven supported setups.
+
+    A shared helper is the mutation, and it is the tempting one -- the two
+    expressions look like the same constant.
+    """
+    from glomap_jax.physics import drydiam
+
+    rng = np.random.default_rng(292)
+    wvol = rng.uniform(1.0e-19, 1.0e-15, 200_000)
+    amplified = {}
+    for setup in SETUPS:
+        tab = modes.build(setup)
+        ours = np.asarray(volume_mode.six_over_pi_x(tab.x))
+        theirs = np.asarray(drydiam.six_over_pi_x(tab.x))
+        for m in range(modes.NMODES):
+            if ours[m] == theirs[m]:
+                continue
+            a = (ours[m] * wvol) ** (1.0 / 3.0)
+            b = (theirs[m] * wvol) ** (1.0 / 3.0)
+            amplified[m + 1] = max(amplified.get(m + 1, 0.0), (a != b).mean())
+    assert amplified, (
+        "the two spellings now agree on every mode of every setup; re-measure "
+        "before factoring them together"
+    )
+    assert max(amplified.values()) > 0.4, (
+        f"the cube root no longer amplifies the 2 ulp gap: {amplified}"
+    )
+    assert 4 in amplified, "mode 4 no longer distinguishes the two spellings"
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", SETUPS)
+def test_the_cube_root_runs_over_all_eight_modes_before_the_override(setup):
+    """`:696` passes `nmodes*nbox` to `cubrt_v`, i.e. the whole array by sequence
+    association, and `:698` then discards the inactive columns.
+
+    So `wetdp` for an absent mode is `drydp` **bit for bit** -- not a cube root
+    that happens to be close, and not zero. Asserted against the Fortran's own
+    `drydp`, which makes it a check on the reference rather than on the port's
+    own arithmetic.
+
+    How much `:698` actually changes is worth stating precisely, because it is
+    less than it looks. For an absent mode `wvol = dvol` exactly (`:681`), so
+    the discarded cube root and `drydp` differ **only** through the two
+    spellings of `sixovrpix` -- `1.0/(x*(pi/6))` here against `6.0/(pi*x)` in
+    `ukca_calc_drydiam`. On the modes where those two agree bitwise, `:698` is a
+    numerical no-op. The companion test below finds the inactive modes where it
+    is not, across all seven setups, and requires at least one.
+    """
+    tab, grid = _trop_grid(setup)
+    inactive = _inactive_cols(tab)
+    if not inactive:
+        pytest.skip(f"setup {setup} has all eight modes active")
+    want = _reference(setup, _inputs(grid))
+    for m in inactive:
+        np.testing.assert_array_equal(
+            np.asarray(want["wetdp"])[:, m],
+            np.asarray(want["drydp"])[:, m],
+            err_msg=f"mode {m + 1}",
+        )
+        # And wvol really is dvol there, which is what makes the two comparable.
+        np.testing.assert_array_equal(
+            np.asarray(want["wvol"])[:, m], np.asarray(want["dvol"])[:, m]
+        )
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_the_inactive_override_is_not_everywhere_a_no_op():
+    """At least one inactive mode where dropping `:698` would change `wetdp`.
+
+    Without this, the test above passes on a port that never implements the
+    override at all -- on the modes where the two `sixovrpix` spellings agree,
+    the cube root reproduces `drydp` by itself.
+    """
+    from glomap_jax.physics import drydiam
+
+    observable = []
+    for setup in SETUPS:
+        tab, grid = _trop_grid(setup)
+        inactive = _inactive_cols(tab)
+        if not inactive:
+            continue
+        want = _reference(setup, _inputs(grid))
+        ours = np.asarray(volume_mode.six_over_pi_x(tab.x))
+        theirs = np.asarray(drydiam.six_over_pi_x(tab.x))
+        for m in inactive:
+            if ours[m] == theirs[m]:
+                continue
+            discarded = (ours[m] * np.asarray(want["wvol"])[:, m]) ** (1.0 / 3.0)
+            if not np.array_equal(discarded, np.asarray(want["drydp"])[:, m]):
+                observable.append((setup, m + 1))
+    assert observable, (
+        "on every inactive mode of every setup the discarded cube root already "
+        "equals drydp, so :698 cannot be shown to fire and the test above is "
+        "vacuous"
+    )
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_the_wvol_accumulation_order_reaches_wetdp():
+    """`wvol` is zeroed at `:588`, accumulated over `icp` in index order, and
+    `pvol_wat` is added **last** at `:625`; `wetdp` is its cube root.
+
+    This is the path that reaches the live trajectory -- `wetdp` feeds
+    `ukca_conden` (`:926`), `ukca_ageing` (`:1130`) and
+    `ukca_calc_coag_kernel` (`:871`) -- so what is asserted is that adding the
+    water first changes `wetdp`, not merely `wvol`.
+
+    Aggregated over every setup and every soluble mode rather than asserted per
+    mode, because it does not survive everywhere: the cube root compresses a
+    relative difference by three, so a one-ulp gap in `wvol` frequently lands on
+    the same double. Measured -- setup 8 mode 3 is one where it does not
+    survive. What matters for the port is that the difference reaches `wetdp`
+    somewhere reachable, and that the fixture shows where.
+    """
+    surviving, lost = [], []
+    for setup in SETUPS:
+        tab, grid = _trop_grid(setup)
+        cols = _soluble_cols(tab)
+        if not cols:
+            continue
+        want = _reference(setup, _inputs(grid))
+        sixovrpix = np.asarray(volume_mode.six_over_pi_x(tab.x))
+        for m in cols:
+            members = [c for c in range(tab.ncp) if tab.component[m, c]]
+            if len(members) < 2:
+                continue
+            parts = [np.asarray(want["pvol"])[:, m, c] for c in members]
+            water = np.asarray(want["pvol_wat"])[:, m]
+
+            last = parts[0].copy()
+            for x in parts[1:]:
+                last = last + x
+            last = last + water
+
+            first = water + parts[0]
+            for x in parts[1:]:
+                first = first + x
+
+            if np.array_equal(last, first):
+                continue
+            a = (sixovrpix[m] * last) ** (1.0 / 3.0)
+            b = (sixovrpix[m] * first) ** (1.0 / 3.0)
+            (surviving if not np.array_equal(a, b) else lost).append((setup, m + 1))
+
+    assert surviving, (
+        "adding the water term first no longer changes wetdp on any soluble "
+        f"mode of any setup (it changed wvol on {len(lost)} of them); the "
+        "accumulation-order hazard is no longer reachable and this test would "
+        "pass on a port that got the order wrong"
+    )
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_mask_nosol_accumulates_then_discards():
+    """At a `mask_nosol` point `:612` accumulates the insoluble partial volumes
+    into `wvol` and `:633` then overwrites the whole thing with `dvol`.
+
+    **And the overwrite is numerically invisible in every supported setup** --
+    measured here, not assumed. `:605` builds the insoluble `pvol` from
+    `mm_ovravcrhocp = (mm/avogadro)/rhocomp`, and
+    `ukca_calc_drydiam.F90:196` builds `dvol` from
+    `ratio1 = mm/(avogadro*rhocomp)`, in the same `icp` order from the same
+    seed. Those two spellings differ only for `cp_su` and `cp_cl` -- both
+    soluble, so neither reaches this fold -- and agree bitwise for `cp_bc`,
+    `cp_oc`, `cp_du` and `cp_so`. So the accumulated volume already equals
+    `dvol` to the last bit and `:633` changes nothing.
+
+    That is why this test asserts the *equality* rather than a difference: a
+    test demanding the discard be observable would be one that cannot pass. What
+    it does pin is that `wetdp` at such a point is the cube root of
+    `sixovrpix*dvol`, and that the fold really did run first.
+    """
+    setup = 2
+    tab = modes.build(setup)
+    specs = [_spec(rh=rh, variant="nosol") for rh in (0.2, 0.62, 0.9)]
+    grid = _rows(tab, specs)
+    want = _reference(setup, _inputs(grid))
+    sixovrpix = np.asarray(volume_mode.six_over_pi_x(tab.x))
+
+    md = jnp.asarray(want["md_out"])
+    seen = False
+    for m in _soluble_cols(tab):
+        mask = jnp.asarray(grid["nd"][:, m] > tab.num_eps[m])
+        _, mask_nosol = volume_mode.solubility_masks(
+            volume_mode.soluble_mass(tab, md, m, mask), mask
+        )
+        rows = np.asarray(mask_nosol)
+        if not rows.any():
+            continue
+        seen = True
+        accumulated = np.zeros(int(rows.sum()))
+        for c in range(tab.ncp):
+            if tab.component[m, c] and not tab.soluble[c]:
+                accumulated = accumulated + np.asarray(want["pvol"])[rows, m, c]
+        assert (accumulated > 0.0).all(), "nothing was accumulated before the discard"
+        np.testing.assert_array_equal(
+            np.asarray(want["wetdp"])[rows, m],
+            (sixovrpix[m] * np.asarray(want["dvol"])[rows, m]) ** (1.0 / 3.0),
+        )
+        # And the discard is numerically invisible, which is the point worth
+        # recording: the accumulated insoluble volume equals dvol bit for bit.
+        np.testing.assert_array_equal(accumulated, np.asarray(want["dvol"])[rows, m])
+    assert seen, "no mask_nosol row; the discard is untested"
+
+
+def test_the_neg_pvol_wat_gate_is_always_active_in_the_box():
+    """`:882` reads `l_fix_neg_pvol_wat .OR. l_glomap_clim_radaer`, and the
+    second disjunct is a `LOGICAL, PARAMETER, .FALSE.`
+    (`ukca_um_legacy_mod.F90:141`), so the gate reduces to the flag -- which
+    `glomap_box_config_mod.F90:323` pins `.TRUE.`.
+
+    Modelling the disjunct as a runtime flag would create a state the reference
+    cannot reach, which is why the port has no knob for it. Asserted from the
+    vendored source so an upstream change fails here rather than silently
+    widening the configuration space.
+    """
+    legacy = (REPO / "fortran" / "src" / "ukca" / "ukca_um_legacy_mod.F90").read_text()
+    assert re.search(r"LOGICAL,\s*PARAMETER\s*::\s*l_glomap_clim_radaer\s*=\s*\.FALSE\.", legacy), (
+        "l_glomap_clim_radaer is no longer a PARAMETER .FALSE.; :882 has a second knob"
+    )
+    box = (REPO / "fortran" / "src" / "box" / "glomap_box_config_mod.F90").read_text()
+    assert re.search(r"glomap_config%l_fix_neg_pvol_wat\s*=\s*\.TRUE\.", box), (
+        "the box no longer pins l_fix_neg_pvol_wat true"
+    )
+    source = SOURCE.read_text(encoding="utf-8")
+    assert "IF (glomap_config%l_fix_neg_pvol_wat .OR. l_glomap_clim_radaer) THEN" in source
+
+
+def test_the_diagnostic_ereport_blocks_are_omitted():
+    """The port's disposition of the three `ereport` blocks, stated where it can
+    fail rather than only in a docstring.
+
+    * `:476-575` (`denom <= 0`/`denom2 <= 0` under `mask_sol`) -- omitted. It
+      prints and aborts and computes nothing that reaches an output.
+    * `:703-880` (the five-way `MINVAL <= 0` guard) -- omitted, and
+      **unreachable**: tripping it overruns the 256-character `cmessage` buffer
+      in the `WRITE` at `:856-876` and gfortran raises "End of record" at
+      `:876`, killing the process before `ereport` at `:877`. There is no
+      reference behaviour to reproduce.
+    * `:882-898` (`MINVAL(pvol_wat) < 0` or `MINVAL(mdwat) < 0`) -- omitted, and
+      this one is **always active** in the box, so the port silently accepts a
+      negative `mdwat` where the reference dies. That is a real divergence, not
+      a tidy-up, and it is recorded here and in the module docstring rather than
+      hidden.
+
+    If the third is ever implemented it needs `nanmin` semantics: gfortran's
+    `MINVAL` skips `NaN` and `jnp.min` propagates it.
+    """
+    source = SOURCE.read_text(encoding="utf-8")
+    assert source.count("CALL ereport(RoutineName,errcode,cmessage)") == 4, (
+        "the number of ereport sites has changed; re-decide the disposition. "
+        "There are four: denom and denom2 inside :476-575, the five-way guard "
+        "at :877, and the negative-water check at :895."
+    )
+    assert "errormessagelength" in source
+    module = (REPO / "src" / "glomap_jax" / "physics" / "volume_mode.py").read_text(
+        encoding="utf-8"
+    )
+    for phrase in (":476-575", ":703-880", ":882-898", "End of record"):
+        assert phrase in module, f"the module docstring no longer records {phrase}"
+    # And the port really does not raise on a negative mdwat.
+    tab = modes.build(1)
+    nd = np.full((1, modes.NMODES), 1000.0)
+    md = np.zeros((1, modes.NMODES, tab.ncp))
+    for m in range(modes.NMODES):
+        for c in range(tab.ncp):
+            if tab.component[m, c]:
+                md[0, m, c] = tab.mmid[m] / max(1, int(tab.component[m].sum()))
+    dvol = np.full((1, modes.NMODES), 1.0e-24)
+    out = volume_mode.volume_mode(
+        tab,
+        nd,
+        md,
+        md.sum(axis=2),
+        np.array([0.6]),
+        dvol,
+        dvol ** (1.0 / 3.0),
+        np.array([303.65]),
+        np.array([1.0e4]),
+        np.array([1.0e-8]),
+        fix_water_content=True,
+        fix_neg_pvol_wat=False,
+    )
+    assert (np.asarray(out[0]) < 0.0).any(), (
+        "the unclamped stratospheric row no longer produces a negative mdwat, "
+        "so the omitted guard has nothing to be silent about"
+    )
+
+
+def test_mdt_reaches_no_output_of_the_port():
+    """`mdt` is read at `:842` only, inside the block that cannot run.
+
+    It stays in the signature so a caller cannot silently transpose arguments,
+    and this asserts it is genuinely inert: garbage in, identical outputs.
+    """
+    tab = modes.build(2)
+    nd = np.full((3, modes.NMODES), 1000.0)
+    md = np.zeros((3, modes.NMODES, tab.ncp))
+    for m in range(modes.NMODES):
+        for c in range(tab.ncp):
+            if tab.component[m, c]:
+                md[:, m, c] = tab.mmid[m] / max(1, int(tab.component[m].sum()))
+    dvol = np.full((3, modes.NMODES), 1.0e-24)
+    args = (
+        tab,
+        nd,
+        md,
+    )
+    tail = (
+        np.array([0.3, 0.6, 0.9]),
+        dvol,
+        dvol ** (1.0 / 3.0),
+        np.full(3, 213.0),
+        np.array([1.0e5, 1.0e4, 1.0e5]),
+        np.full(3, 1.0e-2),
+    )
+    clean = volume_mode.volume_mode(
+        *args, md.sum(axis=2), *tail, fix_water_content=True, fix_neg_pvol_wat=True
+    )
+    for poison in (np.nan, -1.0, 1e300):
+        dirty = volume_mode.volume_mode(
+            *args,
+            np.full((3, modes.NMODES), poison),
+            *tail,
+            fix_water_content=True,
+            fix_neg_pvol_wat=True,
+        )
+        for a, b in zip(clean, dirty, strict=True):
+            np.testing.assert_array_equal(np.asarray(a), np.asarray(b))
+
+
+def test_mm_ovravcrhocp_is_unobservable_through_the_outputs():
+    """A companion to `test_mm_ovravcrhocp_is_two_divisions`, and a caveat on it.
+
+    `(mm/avogadro)/rhocomp` and `mm/(avogadro*rhocomp)` really are different
+    doubles -- but only for `cp_su` and `cp_cl`. Every other component agrees
+    bitwise, and `mm_ovravcrhocp` is read only at `:605` and `:647`, both of
+    which are guarded `.NOT. soluble(icp)`. So the two spellings cannot be told
+    apart from any output of this routine in any supported setup: substituting
+    one for the other leaves every byte-equality test in this file green
+    (measured).
+
+    The faithful spelling is kept and the expression-level test is kept, because
+    the components that differ are exactly the ones a future setup might make
+    insoluble. This test records that the guard is currently expression-level
+    only.
+    """
+    differing_all, differing_insoluble = set(), set()
+    for setup in SETUPS:
+        tab = modes.build(setup)
+        mm = np.asarray(tab.mm[: tab.ncp])
+        rho = np.asarray(tab.rhocomp[: tab.ncp])
+        two, one = (mm / 6.022e23) / rho, mm / (6.022e23 * rho)
+        for c in range(tab.ncp):
+            if two[c] == one[c]:
+                continue
+            differing_all.add(c + 1)
+            if not tab.soluble[c]:
+                differing_insoluble.add((setup, c + 1))
+    assert differing_all == {volume_mode.CP_SU, volume_mode.CP_CL}, (
+        f"the set of components where the two spellings differ has changed: {sorted(differing_all)}"
+    )
+    assert not differing_insoluble, (
+        f"an INSOLUBLE component now distinguishes the two spellings "
+        f"({sorted(differing_insoluble)}), so mm_ovravcrhocp has become "
+        "observable through pvol and deserves a byte-equality test"
+    )
+
+
+def test_the_cube_root_spelling_is_not_observable_on_this_jax():
+    """`wetdp` goes through `numerics.cbrt`, i.e. `x ** (1.0/3.0)` -- and on
+    this build that cannot be distinguished from `jnp.cbrt`.
+
+    Measured here: substituting `jnp.cbrt` in `wet_diameter` leaves every
+    byte-equality test in this file green, and over 800,000 samples spanning
+    1e-32 to 1e3 the two agree on every point. That is a property of the
+    installed XLA, not of the port -- `tests/test_numerics.py`'s
+    `test_how_far_jnp_cbrt_is_from_the_faithful_form_on_this_jax` records the
+    same thing, and on jax 0.11.0 the two disagree on 94% of its grid by up to
+    1.3e-14.
+
+    So the rule stands on the numerics module's measurement, not on this
+    fixture, and `wetdp`'s fidelity to `cubrt_v` here is pinned by byte equality
+    against the compiled routine rather than by the spelling. This test exists
+    so nobody later reads task 45's green suite as evidence that `jnp.cbrt`
+    would have been caught.
+    """
+    rng = np.random.default_rng(696)
+    samples = np.concatenate(
+        [
+            rng.uniform(1.0e-32, 1.0e-16, 200_000),
+            np.exp(rng.uniform(np.log(1.0e-32), np.log(1.0e-15), 200_000)),
+        ]
+    )
+    faithful = np.asarray(jnp.asarray(samples) ** (1.0 / 3.0))
+    other = np.asarray(jnp.cbrt(jnp.asarray(samples)))
+    differ = int((faithful != other).sum())
+    if differ:
+        pytest.skip(
+            f"jnp.cbrt now differs from x**(1/3) on {differ} of {len(samples)} "
+            "samples; this test's premise no longer holds and the wetdp fixture "
+            "should be extended to reach a disagreement"
+        )
+    # Only reachable when they agree: state the consequence rather than leaving
+    # it to be inferred.
+    assert differ == 0
