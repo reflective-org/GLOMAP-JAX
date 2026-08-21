@@ -59,5 +59,11 @@ src = ["src", "tests"]
 # would either fail CI or tempt an in-place edit that the tamper test forbids.
 extend-exclude = ["fortran", ".claude", ".worktrees"]
 
+[tool.ruff.lint.per-file-ignores]
+# make_report.py is mostly one embedded HTML document held in a Python string.
+# Reflowing CSS rules and template literals to 100 columns to satisfy a Python
+# line-length rule would make the document harder to read, not easier.
+"figures/make_report.py" = ["E501"]
+
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "NPY", "RUF"]

@@ -38,3 +38,8 @@ fortran/TOOLCHAIN.txt
 .claude/worktrees/
 .claude/settings.local.json
 .worktrees/
+
+# Generated files. Regenerate with:
+#   python figures/extract_figure_data.py && python figures/measure_hazards.py && python figures/make_report.py
+figures/data.json
+figures/hazards.json
