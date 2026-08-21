@@ -23,8 +23,18 @@ def _read(name: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-def test_licence_is_bsd_3_clause_with_crown_copyright():
+def test_root_licence_is_apache_2():
+    """Fails if the outbound licence is reverted to BSD-3 or truncated."""
     text = _read("LICENCE")
+    assert "Apache License" in text
+    assert "Version 2.0, January 2004" in text
+    # The last section of the terms -- gone if the text is truncated.
+    assert "9. Accepting Warranty or Additional Liability" in text
+
+
+def test_fortran_licence_is_bsd_3_clause_with_crown_copyright():
+    """Fails if a re-vendor drops the BSD notice that clause 1 obliges us to keep."""
+    text = _read("fortran/LICENCE")
     assert "BSD 3-Clause" in text
     assert "Crown Copyright (c) Met Office" in text
     # Clause 3 must be present verbatim -- it is what forbids implying endorsement.
@@ -35,12 +45,41 @@ def test_readme_carries_the_no_endorsement_disclaimer():
     assert DISCLAIMER in _read("README.md")
 
 
+def test_notice_carries_bsd_attribution_verbatim():
+    """Fails if NOTICE is deleted, or its BSD reproduction drifts from
+    fortran/LICENCE -- clause 2 requires the notice, conditions and
+    disclaimer verbatim, not a paraphrase."""
+    text = _read("NOTICE")
+    assert "Copyright (c) 2026 Reflective" in text
+    assert DISCLAIMER in text
+    # The whole BSD licence must appear, byte-for-byte as vendored.
+    assert _read("fortran/LICENCE").strip() in text
+
+
 def test_copyright_file_separates_vendored_from_new_code():
+    """Fails if COPYRIGHT.md loses either licence, either owner, or the
+    disclaimer -- e.g. a rewrite that describes the repo as single-licence."""
     text = _read("COPYRIGHT.md")
+    assert "Apache License 2.0" in text
+    assert "BSD 3-Clause" in text
     assert "Crown Copyright (c) Met Office" in text
     assert "University of Leeds" in text
     assert "Reflective" in text
     assert DISCLAIMER in text
+
+
+def test_pyproject_ships_both_licences_in_distributions():
+    """Fails if a packaging edit stops wheels/sdists carrying the BSD notice
+    (clause 2) or the Apache text alongside the code."""
+    import tomllib
+
+    with open(REPO / "pyproject.toml", "rb") as f:
+        project = tomllib.load(f)["project"]
+    assert project["license"] == "Apache-2.0"
+    licence_files = project["license-files"]
+    for name in ["LICENCE", "NOTICE", "fortran/LICENCE"]:
+        assert name in licence_files, f"{name} missing from license-files"
+        assert (REPO / name).is_file(), f"{name} listed but absent"
 
 
 def test_provenance_records_the_upstream_commit():

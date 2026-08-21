@@ -10,7 +10,7 @@ Fortran is attributable to the port, never to a local edit.
 | upstream commit | `387c5bb0f1166e67f029930ba624bf159bc68627` |
 | intermediate | `https://github.com/reflective-org/glomap-box` @ `2befe04` |
 | UKCA files vendored | 46 (44 byte-identical to upstream, 2 patched) |
-| licence | BSD 3-Clause, Crown Copyright Met Office (see `LICENCE`) |
+| licence | BSD 3-Clause, Crown Copyright Met Office (see `fortran/LICENCE`) |
 
 ## What is and is not editable
 
