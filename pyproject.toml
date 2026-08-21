@@ -57,7 +57,7 @@ src = ["src", "tests"]
 # fortran/ is the vendored read-only reference tree (see PROVENANCE.md). Its
 # Python helpers came in with it and are not ours to reformat -- linting them
 # would either fail CI or tempt an in-place edit that the tamper test forbids.
-extend-exclude = ["fortran", ".claude"]
+extend-exclude = ["fortran", ".claude", ".worktrees"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "NPY", "RUF"]

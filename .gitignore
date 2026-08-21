@@ -37,3 +37,4 @@ fortran/TOOLCHAIN.txt
 # Agent worktrees and machine-local Claude Code state live here.
 .claude/worktrees/
 .claude/settings.local.json
+.worktrees/
