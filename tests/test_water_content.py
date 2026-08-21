@@ -35,7 +35,15 @@ needs_binding = pytest.mark.skipif(
     reason="binding not built; run validation/build_f2py.sh",
 )
 
-# H+, NH4+, Cl-, SO4^2- -- the four the box caller can actually populate.
+# The four ion slots the box caller can populate: H+ (1), the slot the caller
+# fills from `cp_cl` and calls Na (3), Cl- (-4) and SO4-- (-2).
+#
+# Slot 3 is deliberately not named here. `ukca_volume_mode.F90:397` fills it
+# from sea salt and calls it Na, while `ukca_water_content_v`'s table labels
+# cation row 3 NH4 and row 2 Na -- and the caller fills slot 2 from `cp_nh4`.
+# One of the two labellings is wrong; which one is issue #24. The numerics are
+# unaffected either way, since both sides use the raw index, and the port
+# reproduces that index arithmetic exactly.
 BOX_SPECIES = (1, 3, -4, -2)
 
 

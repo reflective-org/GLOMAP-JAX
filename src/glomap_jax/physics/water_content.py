@@ -34,6 +34,23 @@ That is why the flag changes answers for compositions that never touch the
 patched (1,-3) coefficient, and why a both-settings test needs a low-humidity
 row as well as a nitrate row.
 
+## The cation labels disagree between the caller and the table
+
+`ukca_volume_mode.F90:397` fills `cl(:,3)` from `cp_cl` and calls it Na, and
+`:405` fills `cl(:,2)` from `cp_nh4`. The table labels cation row **2** Na and
+row **3** NH4 (`ukca_water_content_v.F90:176-225`). Since the pair loop indexes
+`y(ic,...)` with the same `ic` it reads `cli(:,ic)` from, one of the two is
+wrong and one salt's concentrations are meeting the other's fit.
+
+It is not cosmetic here. `cp_nh4 = 9` while `ncp = 6`, so `:402`'s guard
+(`UBOUND(component,DIM=2) >= cp_no3`, i.e. `6 >= 7`) is false and `cl(:,2)` is
+never assigned in any box setup. The only populated cation slots are 1 and 3 —
+so sea salt, the dominant soluble mass, selects the row labelled NH4.
+
+**The port takes no position.** It reproduces the raw index arithmetic and is
+byte-equal to the Fortran, so it inherits whichever way this falls. No fidelity
+flag, because a flag would imply we know which setting is right. Issue #24.
+
 ## The stoichiometry branch is dead
 
 `:255-259` divides `n` through by the charges when `z(ic) == z(ia)` and
