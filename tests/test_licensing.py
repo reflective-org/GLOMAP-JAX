@@ -57,7 +57,11 @@ def test_notice_carries_bsd_attribution_verbatim():
 
 
 def test_copyright_file_separates_vendored_from_new_code():
+    """Fails if COPYRIGHT.md loses either licence, either owner, or the
+    disclaimer -- e.g. a rewrite that describes the repo as single-licence."""
     text = _read("COPYRIGHT.md")
+    assert "Apache License 2.0" in text
+    assert "BSD 3-Clause" in text
     assert "Crown Copyright (c) Met Office" in text
     assert "University of Leeds" in text
     assert "Reflective" in text
