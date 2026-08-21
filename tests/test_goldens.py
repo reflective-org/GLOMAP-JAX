@@ -43,6 +43,7 @@ LEAF_ARCHIVES = {
     "budidx.f64.tables.npz",
     "coagmode.f64.tables.npz",
     "vapour.f64.leaf.npz",
+    "drydiam.f64.leaf.npz",
 }
 
 # Task 13. The floor is a property of the trajectory over 48 steps of 1800 s.
