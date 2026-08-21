@@ -434,6 +434,38 @@ and a 35-character trailer.
 **Trust the code.** The intent is clear from the message; the buffer is what is
 wrong.
 
+### Measured, not argued: it kills the process before `ereport` runs
+
+Reproduced standalone with the reference compiler and flags, writing the same
+format into a 256-character buffer:
+
+```
+At line 13 of file up11.f90
+Fortran runtime error: End of record
+Error termination.                       exit 2
+```
+
+And reproduced in the model itself: task 35e's fixture tried to trip the
+`:704-708` five-way guard and the process died at `:876` rather than reporting
+anything.
+
+That changes the severity. This was written up as a truncated message; it is
+not truncated, it is a **hard termination inside the diagnostic**. The block
+exists to tell an operator *which* mode went non-positive and *where*, and
+instead it aborts with a runtime error naming neither — and `ereport` at `:877`
+is never reached, so the shim cannot see it either. A run that would have
+stopped with a clear cause stops with "End of record".
+
+It is also the concrete instance of #16 ("gate A dies on 19 of 20 error
+paths"): this path cannot be exercised in-process at all, by us or by anyone,
+which is why the guard is listed as unreachable in
+`tests/test_volume_mode_fixtures.py` with the reason recorded rather than left
+as an untested branch.
+
+**Disposition unchanged** -- `documentation-only`, since the port does not
+reproduce a diagnostic it cannot reach. What changes is the write-up: report it
+as a crash, not a formatting slip.
+
 **Impact.** Writing past the record length of an internal file raises
 `Fortran runtime error: End of record`, which aborts **before** `ereport` is
 reached. So the branch never produces the diagnostic it was written to produce:
