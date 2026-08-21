@@ -1,5 +1,6 @@
 [build-system]
-requires = ["hatchling"]
+# >=1.27 for PEP 639 licence expressions and license-files
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,7 +8,10 @@ name = "glomap-jax"
 version = "0.1.0"
 description = "Differentiable GLOMAP-mode aerosol microphysics in Python/JAX, ported faithfully from the UKCA Fortran"
 readme = "README.md"
-license = { file = "LICENCE" }
+license = "Apache-2.0"
+# Ships the Apache text, the Met Office BSD notice, and the NOTICE that
+# reproduces it into every wheel and sdist (BSD-3 clause 2).
+license-files = ["LICENCE", "NOTICE", "fortran/LICENCE"]
 authors = [{ name = "Ali Akherati", email = "ali@reflective.org" }]
 requires-python = ">=3.11"
 dependencies = [

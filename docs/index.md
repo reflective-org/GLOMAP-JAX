@@ -23,8 +23,8 @@ Order 1 (faithful port) in progress. See `PROGRESS.md` in the repository root.
 
 ## Licence
 
-BSD 3-Clause. Vendored Fortran is Crown Copyright Met Office with University of
-Leeds contributions; see `COPYRIGHT.md`.
+Apache 2.0 for the port; vendored Fortran is Crown Copyright Met Office with
+University of Leeds contributions under BSD 3-Clause. See `COPYRIGHT.md`.
 
 **Not affiliated with, endorsed by, or an official product of the Met Office,
 NCAS, or the University of Leeds.**

@@ -68,6 +68,20 @@ def test_copyright_file_separates_vendored_from_new_code():
     assert DISCLAIMER in text
 
 
+def test_pyproject_ships_both_licences_in_distributions():
+    """Fails if a packaging edit stops wheels/sdists carrying the BSD notice
+    (clause 2) or the Apache text alongside the code."""
+    import tomllib
+
+    with open(REPO / "pyproject.toml", "rb") as f:
+        project = tomllib.load(f)["project"]
+    assert project["license"] == "Apache-2.0"
+    licence_files = project["license-files"]
+    for name in ["LICENCE", "NOTICE", "fortran/LICENCE"]:
+        assert name in licence_files, f"{name} missing from license-files"
+        assert (REPO / name).is_file(), f"{name} listed but absent"
+
+
 def test_provenance_records_the_upstream_commit():
     text = _read("PROVENANCE.md")
     # The full hash, not a prefix: goldens are only meaningful against a known

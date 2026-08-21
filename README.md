@@ -8,9 +8,10 @@ Work in progress. See `docs/` for the port plan and validation strategy.
 
 ## Licence and attribution
 
-BSD 3-Clause. Vendored UKCA Fortran under `fortran/` is Crown Copyright (c) Met
-Office with University of Leeds contributions; new Python/JAX code is Copyright
-(c) Reflective, under the same licence. See `LICENCE` and `COPYRIGHT.md`.
+New Python/JAX code is Copyright (c) Reflective under the Apache License 2.0
+(`LICENCE`). Vendored UKCA Fortran under `fortran/` is Crown Copyright (c) Met
+Office with University of Leeds contributions, under BSD 3-Clause
+(`fortran/LICENCE`). See `NOTICE` and `COPYRIGHT.md`.
 
 **Not affiliated with, endorsed by, or an official product of the Met Office,
 NCAS, or the University of Leeds.**
