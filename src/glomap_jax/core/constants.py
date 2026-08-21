@@ -42,6 +42,10 @@ RMOL: Final[float] = 8.314
 RHO_SO4: Final[float] = 1769.0
 """Density of a sulfate particle, kg m-3. `ukca_config_constants_mod.F90:131`."""
 
+RHO_WATER: Final[float] = 1000.0
+"""Density of pure water, kg m-3. `ukca_config_constants_mod.F90:125`.
+Reaches `ukca_volume_mode.F90:299` as `mmwrhow = mmw*rho_water`."""
+
 # --- ukca_constants.F90 -----------------------------------------------------
 
 PI: Final[float] = 3.14159265358979323846
@@ -53,6 +57,14 @@ ZERODEGC: Final[float] = 273.15
 
 MMSUL: Final[float] = 0.09808
 """Molar mass of H2SO4, kg mol-1. `ukca_constants.F90:59`."""
+
+MMW: Final[float] = 0.0180154
+"""Molar mass of water, kg mol-1. `ukca_constants.F90:60`.
+
+Not `18.0e-3`. `ukca_water_content_v.F90:332` writes the *literal* `18.0e-3`
+where this routine would have served, and the two are different doubles --
+which is why `water_content.py` keeps the literal and `volume_mode.py` imports
+this."""
 
 NMOL: Final[float] = 1.0e2
 """Molecules per new particle at nucleation. `ukca_constants.F90:44`."""
@@ -103,9 +115,11 @@ __all__ = [
     "EPS_D",
     "J_EPS",
     "MMSUL",
+    "MMW",
     "NMOL",
     "PI",
     "RHO_SO4",
+    "RHO_WATER",
     "RMOL",
     "SQD_CLAMP",
     "XXX_EPS",
