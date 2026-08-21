@@ -45,6 +45,17 @@ def test_readme_carries_the_no_endorsement_disclaimer():
     assert DISCLAIMER in _read("README.md")
 
 
+def test_notice_carries_bsd_attribution_verbatim():
+    """Fails if NOTICE is deleted, or its BSD reproduction drifts from
+    fortran/LICENCE -- clause 2 requires the notice, conditions and
+    disclaimer verbatim, not a paraphrase."""
+    text = _read("NOTICE")
+    assert "Copyright (c) 2026 Reflective" in text
+    assert DISCLAIMER in text
+    # The whole BSD licence must appear, byte-for-byte as vendored.
+    assert _read("fortran/LICENCE").strip() in text
+
+
 def test_copyright_file_separates_vendored_from_new_code():
     text = _read("COPYRIGHT.md")
     assert "Crown Copyright (c) Met Office" in text
