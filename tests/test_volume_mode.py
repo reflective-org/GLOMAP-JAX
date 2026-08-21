@@ -852,7 +852,7 @@ def test_the_soluble_volumes_are_byte_equal_in_the_troposphere(setup, fix_water)
     if not cols:
         pytest.skip(f"setup {setup} has no active soluble mode")
 
-    mdwat, wvol, rhopar, pvol, pvol_wat = volume_mode.soluble_volumes(
+    mdwat, wvol, rhopar, pvol, pvol_wat = volume_mode.partial_volumes(
         tab,
         grid["nd"],
         want["md_out"],
@@ -894,7 +894,7 @@ def test_pvol_is_the_only_conditionally_written_output():
     setup = 2
     tab, grid = _trop_grid(setup)
     want = _reference(setup, _inputs(grid))
-    _, _, _, pvol, _ = volume_mode.soluble_volumes(
+    _, _, _, pvol, _ = volume_mode.partial_volumes(
         tab,
         grid["nd"],
         want["md_out"],
@@ -1051,7 +1051,7 @@ def test_the_masked_divisions_keep_the_gradient_finite():
     dvol = np.full((2, modes.NMODES), 1.0e-24)
 
     def total(masses):
-        _, wvol, rhopar, _, pvol_wat = volume_mode.soluble_volumes(
+        _, wvol, rhopar, _, pvol_wat = volume_mode.partial_volumes(
             tab,
             nd,
             masses,
@@ -1172,7 +1172,7 @@ def test_mask_sol_and_mask_nosol_do_not_partition_mask():
         )
         assert (np.asarray(want["pvol_wat"])[rows, m] == 0.0).all()
 
-    _, _, _, pvol, _ = volume_mode.soluble_volumes(
+    _, _, _, pvol, _ = volume_mode.partial_volumes(
         tab,
         grid["nd"],
         want["md_out"],
@@ -1233,7 +1233,7 @@ def test_mask_nosol_is_reached_and_zeroes_the_soluble_pvol():
         )
 
     cols = _soluble_cols(tab)
-    _, wvol, rhopar, pvol, pvol_wat = volume_mode.soluble_volumes(
+    _, wvol, rhopar, pvol, pvol_wat = volume_mode.partial_volumes(
         tab,
         grid["nd"],
         want["md_out"],
@@ -1397,7 +1397,7 @@ def test_the_stratospheric_branch_is_byte_equal(setup, fix_neg):
     if not cols:
         pytest.skip(f"setup {setup} has no active soluble mode")
 
-    mdwat, wvol, rhopar, pvol, pvol_wat = volume_mode.soluble_volumes(
+    mdwat, wvol, rhopar, pvol, pvol_wat = volume_mode.partial_volumes(
         tab,
         grid["nd"],
         want["md_out"],
@@ -1549,7 +1549,7 @@ def test_the_two_strat_overrides_use_different_masks():
     assert seen, "no mask_nosol row below putls; the two masks were never asked to differ"
 
     cols = _soluble_cols(tab)
-    mdwat, _, rhopar, _, _ = volume_mode.soluble_volumes(
+    mdwat, _, rhopar, _, _ = volume_mode.partial_volumes(
         tab,
         grid["nd"],
         want["md_out"],
@@ -1645,3 +1645,314 @@ def test_the_strat_water_forms_three_separate_statements():
             f"'{label}' agrees with the faithful form on all 200,000 samples; "
             "that check cannot fail"
         )
+
+
+# ---------------------------------------------------------------------------
+# Task 44 -- the insoluble and inactive branches
+# ---------------------------------------------------------------------------
+
+# Setups with an active insoluble mode. Setups 1, 3 and 5 are four-mode,
+# all-soluble, so `:638` is unreachable in them.
+INSOLUBLE_SETUPS = tuple(
+    s
+    for s in SETUPS
+    if any(modes.build(s).mode[m] and modes.build(s).modesol[m] != 1 for m in range(modes.NMODES))
+)
+
+
+def _insoluble_cols(tab) -> list[int]:
+    return [m for m in range(modes.NMODES) if tab.mode[m] and tab.modesol[m] != 1]
+
+
+def _inactive_cols(tab) -> list[int]:
+    return [m for m in range(modes.NMODES) if not tab.mode[m]]
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", SETUPS)
+@pytest.mark.parametrize("grid_name", ["trop", "strat"])
+def test_every_mode_of_every_setup_is_byte_equal(setup, grid_name):
+    """The whole mode loop, all three branches, all eight columns.
+
+    Up to task 43 the comparisons were sliced to the soluble modes; this is the
+    unsliced one, so an insoluble or absent column that was quietly wrong until
+    now has nowhere left to hide.
+    """
+    tab, grid = (_trop_grid if grid_name == "trop" else _strat_grid)(setup)
+    want = _reference(setup, _inputs(grid))
+    mdwat, wvol, rhopar, pvol, pvol_wat = volume_mode.partial_volumes(
+        tab,
+        grid["nd"],
+        want["md_out"],
+        grid["rh"],
+        want["dvol"],
+        grid["t"],
+        grid["pmid"],
+        grid["s"],
+        fix_water_content=True,
+        fix_neg_pvol_wat=True,
+    )
+    for name, got, ref in (
+        ("mdwat", mdwat, want["mdwat"]),
+        ("wvol", wvol, want["wvol"]),
+        ("rhopar", rhopar, want["rhopar"]),
+        ("pvol_wat", pvol_wat, want["pvol_wat"]),
+        ("pvol", pvol, want["pvol"]),
+    ):
+        np.testing.assert_array_equal(np.asarray(got), np.asarray(ref), err_msg=name)
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", INSOLUBLE_SETUPS)
+def test_the_insoluble_pvol_is_unmasked(setup):
+    """`:647` has no `WHERE` and no `dvol*mfrac_0` default, unlike `:597`,
+    `:613` and `:686`.
+
+    Demonstrated on an EMPTY insoluble mode -- `nd` at or below `num_eps` --
+    where the two spellings genuinely differ: the Fortran writes
+    `md*mm_ovravcrhocp` and the symmetric default would write `dvol*mfrac_0`.
+    """
+    tab = modes.build(setup)
+    cols = _insoluble_cols(tab)
+    specs = [_spec(nd=kind) for kind in ("zero", "eps_below", "eps_exact", "eps_above")]
+    grid = _rows(tab, specs)
+    want = _reference(setup, _inputs(grid))
+
+    scales = volume_mode._Scales(tab)
+    md = np.asarray(want["md_out"])
+    distinguishable = False
+    for m in cols:
+        empty = np.asarray(grid["nd"][:, m] <= tab.num_eps[m])
+        assert empty.any(), "no unmasked row; the point of the test is gone"
+        for c in range(tab.ncp):
+            if not tab.component[m, c]:
+                continue
+            unmasked = md[empty, m, c] * np.asarray(scales.mm_ovravcrhocp)[c]
+            default = np.asarray(want["dvol"])[empty, m] * tab.mfrac_0[m, c]
+            np.testing.assert_array_equal(
+                np.asarray(want["pvol"])[empty, m, c],
+                unmasked,
+                err_msg=f"setup {setup} mode {m + 1} cpt {c + 1}: :647 was masked",
+            )
+            distinguishable |= not np.array_equal(unmasked, default)
+    assert distinguishable, (
+        f"setup {setup}: the unmasked value equals the mfrac_0 default on every "
+        "empty row, so adding the symmetric default would be invisible here"
+    )
+
+
+def test_the_third_guarded_division_uses_mask_not_mask_sol():
+    """`:665` is guarded by `mask`; `:579` and `:627` by `mask_sol`.
+
+    On an insoluble mode `mask_sol` is never computed at all -- there is no
+    `mdsol` in that branch -- so reusing `:627`'s guard would mean inventing
+    one. The distinction is asserted from the source text as well as from
+    behaviour, because it is a *structural* claim about which masks exist.
+    """
+    source = SOURCE.read_text(encoding="utf-8")
+    body = source[source.index("ELSE  ! if mode not soluble") :]
+    body = body[: body.index("END IF ! if mode is soluble")]
+    assert "rhopar(:,imode)=rhotmp2(:)/denom2(:)" in body, ":665 no longer reads as expected"
+    assert "mask_sol" not in body, (
+        "the insoluble branch now mentions mask_sol; :665's guard may have changed"
+    )
+    assert "WHERE (mask(:))" in body
+
+
+@needs_binding
+@pytest.mark.fortran
+def test_the_insoluble_branch_has_no_denom2_diagnostic():
+    """The `denom2 <= 0` `ereport` block at `:476-575` is inside the SOLUBLE arm
+    only, so `:665` divides by whatever `denom2` holds.
+
+    The gap is real and the port reproduces it -- `numerics.safe_divide` is
+    guarded on `mask`, not on `denom2 != 0`, so a masked point with
+    `denom2 == 0` gives an infinity here exactly as the reference does.
+
+    It is also **unreachable**, and provably rather than empirically: no
+    insoluble mode in any supported setup carries two different densities
+    (mode 5 is bc + oc at 1500, modes 6 and 7 are dust at 2650). Write
+    `x_c = md_c*mm_c`. Then `denom2 = sum x_c`, `rhotmp2 = rho*sum x_c` and
+    `dvol = (1/avogadro)*sum x_c/rho` with a single `rho`, so `denom2 == 0`
+    forces `dvol == 0`, and `ukca_calc_drydiam` -- or, past it, the five-way
+    guard at `:704` -- stops the call before `:665` can be observed.
+
+    Recorded as an invariant so that a future setup with a mixed-density
+    insoluble mode fails this test rather than silently opening the gap.
+    """
+    for setup in INSOLUBLE_SETUPS:
+        tab = modes.build(setup)
+        for m in _insoluble_cols(tab):
+            densities = {tab.rhocomp[c] for c in range(tab.ncp) if tab.component[m, c]}
+            assert len(densities) == 1, (
+                f"setup {setup} mode {m + 1} now carries components of {len(densities)} "
+                "different densities, so denom2 == 0 with dvol > 0 has become "
+                "constructible and :665 can divide by zero unreported"
+            )
+
+    source = SOURCE.read_text(encoding="utf-8")
+    soluble_arm = source[
+        source.index("mask_error(:)=") : source.index("ELSE  ! if mode not soluble")
+    ]
+    assert "DENOM2(I) <= 0.0" in soluble_arm, "the diagnostic moved"
+    insoluble_arm = source[source.index("ELSE  ! if mode not soluble") :]
+    insoluble_arm = insoluble_arm[: insoluble_arm.index("END IF ! if mode is soluble")]
+    assert "ereport" not in insoluble_arm.lower(), "the insoluble branch gained a diagnostic"
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", INSOLUBLE_SETUPS)
+def test_wvol_on_the_insoluble_branch_is_exactly_dvol(setup):
+    """`:642`, set before the `pvol` loop and never accumulated into.
+
+    So `wetdp` on an insoluble mode is a pure function of `dvol`: the partial
+    volumes the branch goes on to compute do not enter it, however large they
+    are. Asserted bit-for-bit against the Fortran's own `dvol`, on rows where
+    the accumulated partial volumes are demonstrably non-zero.
+    """
+    tab, grid = _trop_grid(setup)
+    want = _reference(setup, _inputs(grid))
+    for m in _insoluble_cols(tab):
+        np.testing.assert_array_equal(
+            np.asarray(want["wvol"])[:, m], np.asarray(want["dvol"])[:, m]
+        )
+        total = np.zeros(len(grid["rh"]))
+        for c in range(tab.ncp):
+            if tab.component[m, c]:
+                total = total + np.asarray(want["pvol"])[:, m, c]
+        assert (total > 0.0).any(), (
+            f"mode {m + 1} accumulated no partial volume at all, so 'never "
+            "accumulated into' is untested"
+        )
+        assert not np.array_equal(np.asarray(want["wvol"])[:, m], total), (
+            f"mode {m + 1}: the sum of the partial volumes equals dvol, so a "
+            "port that DID accumulate would be indistinguishable"
+        )
+
+
+def test_rhopar_on_the_insoluble_branch_cannot_be_shown_to_be_a_weighted_mean():
+    """Recorded because the plan's acceptance criterion for it is unsatisfiable.
+
+    It asks for "a setup-8 or setup-6 leaf row with mixed densities (dust 2650
+    against BC/OC 1500)". No such row exists: setup 8's insoluble modes are 5
+    (bc + oc, both 1500) and 6 and 7 (dust alone, 2650), and setup 6's are 6 and
+    7 (dust alone). Every insoluble mode in every supported setup is
+    single-density, so `rhotmp2/denom2` comes out at that density whatever the
+    weights are, and no weighting error is observable on this branch.
+
+    Where a genuine mass-weighted mean IS testable is the SOLUBLE branch, whose
+    modes 3 and 4 carry su (1769), bc (1500), oc (1500) and cl (2165) together.
+    That is covered by the byte-equality tests above, and the mutation "take
+    rhopar from the soluble-only accumulators" reddens there.
+    """
+    mixed_soluble, mixed_insoluble = [], []
+    for setup in SETUPS:
+        tab = modes.build(setup)
+        for m in range(modes.NMODES):
+            if not tab.mode[m]:
+                continue
+            densities = {tab.rhocomp[c] for c in range(tab.ncp) if tab.component[m, c]}
+            if len(densities) > 1:
+                (mixed_soluble if tab.modesol[m] == 1 else mixed_insoluble).append((setup, m + 1))
+    assert not mixed_insoluble, (
+        f"an insoluble mode now has mixed densities: {mixed_insoluble}. The "
+        "criterion has become satisfiable and deserves a real test."
+    )
+    assert mixed_soluble, "no soluble mode has mixed densities either; re-derive"
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", SETUPS)
+def test_the_inactive_mode_pvol_default_is_dead_code(setup):
+    """`:686` can never execute.
+
+    `ukca_mode_setup.F90:693` sets `mode = (mode_choice > 0)` and `:700-702`
+    makes `component(imode,icp)` true only when `mode_choice(imode) == 1`. So
+    `component` implies `mode`, while `:686` is inside `ELSE` on `mode(imode)`.
+    Checked from the tables rather than by reading the conditional, and the
+    enclosing routine is checked too -- `ukca_mode_allcp_4mode` is dead code
+    that contains a near-identical block.
+
+    `pvol` for an absent mode is therefore never written by this routine at all,
+    and the value the caller sees is the one it pre-zeroed. Asserted against the
+    Fortran, not inferred.
+    """
+    tab = modes.build(setup)
+    inactive = _inactive_cols(tab)
+    if not inactive:
+        pytest.skip(f"setup {setup} has all eight modes active")
+    for m in inactive:
+        assert not tab.component[m].any(), (
+            f"setup {setup} mode {m + 1} is inactive and yet carries components; "
+            ":686 has become live"
+        )
+        assert tab.mode_choice[m] != 1
+
+    _, grid = _trop_grid(setup)
+    want = _reference(setup, _inputs(grid))
+    for m in inactive:
+        assert (np.asarray(want["pvol"])[:, m, :] == 0.0).all(), (
+            "the Fortran wrote pvol for an absent mode; :686 is not dead"
+        )
+        np.testing.assert_array_equal(
+            np.asarray(want["wvol"])[:, m], np.asarray(want["dvol"])[:, m]
+        )
+        assert (np.asarray(want["rhopar"])[:, m] == 1769.0).all()
+        assert (np.asarray(want["mdwat"])[:, m] == 0.0).all()
+        assert (np.asarray(want["pvol_wat"])[:, m] == 0.0).all()
+
+
+def test_the_dead_default_would_be_visible_if_it_ever_ran():
+    """Why `:686` is worth reproducing rather than deleting.
+
+    Unlike the soluble branch, an inactive mode's `mfrac_0` is NOT zero at the
+    cells `component` excludes -- dust carries 1.0 in modes 6-8 of most setups,
+    and bc/oc carry 0.5 each in mode 5 of setups 1, 3, 5 and 6. So if a future
+    table ever made `component` true for an inactive mode, `:686` would write a
+    visibly non-zero `pvol` where the port currently leaves a zero.
+    """
+    nonzero = [
+        (setup, m + 1, c + 1)
+        for setup in SETUPS
+        for m in range(modes.NMODES)
+        for c in range(modes.build(setup).ncp)
+        if not modes.build(setup).mode[m] and modes.build(setup).mfrac_0[m, c] != 0.0
+    ]
+    assert nonzero, "every inactive mode now has an all-zero mfrac_0; re-derive the argument"
+
+
+@needs_binding
+@pytest.mark.fortran
+@pytest.mark.parametrize("setup", INSOLUBLE_SETUPS)
+def test_the_insoluble_accumulator_mask_is_not_observable(setup):
+    """Recorded because dropping it is a vacuous mutation, and that is worth
+    knowing before someone "tightens" the branch.
+
+    `:658-668` accumulates `rhotmp2` and `denom2` under `WHERE (mask)`, and
+    `:665-670` then writes `rhopar` under the same `WHERE` with `rho_so4` on the
+    `ELSE`. So whatever the accumulators hold off the mask is discarded, and
+    removing the inner mask leaves every byte-equality test in this file green
+    -- measured.
+
+    The mask that *is* observable in this branch is the one on `:665` itself:
+    a masked-out row must come back as exactly `rho_so4`, not as a quotient.
+    """
+    tab, grid = _trop_grid(setup)
+    want = _reference(setup, _inputs(grid))
+    seen = False
+    for m in _insoluble_cols(tab):
+        empty = np.asarray(grid["nd"][:, m] <= tab.num_eps[m])
+        if not empty.any():
+            continue
+        seen = True
+        assert (np.asarray(want["rhopar"])[empty, m] == 1769.0).all(), (
+            f"mode {m + 1}: a masked-out row is not rho_so4"
+        )
+        assert not (np.asarray(want["rhopar"])[~empty, m] == 1769.0).all(), (
+            f"mode {m + 1}: every masked row is also 1769, so the :665 guard is untested here"
+        )
+    assert seen, "no masked-out insoluble row on this fixture"

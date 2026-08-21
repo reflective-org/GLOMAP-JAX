@@ -81,6 +81,40 @@ A sulfate-free sea-salt mode gives `cl(3) = cl(-4)` bit-for-bit (both are
 and `ions(1)` is FALSE. Every H+ pair then contributes nothing. Assuming H+ is
 present whenever any anion is inverts that.
 
+## Task 44 — the insoluble and inactive branches
+
+The insoluble branch (`:638-673`) is not the soluble one with the water taken
+out. Three differences a symmetric rewrite would erase:
+
+* **`pvol` at `:647` is unmasked and has no default.** `:597` and `:613` both
+  carry an `ELSE WHERE pvol = dvol*mfrac_0`, and `:686` writes the same default
+  for an absent mode. `:647` has neither: it assigns `md*mm_ovravcrhocp` on
+  every point, including where `nd <= num_eps`. Adding the symmetric default
+  changes `pvol` for an empty insoluble mode.
+* **`wvol` at `:642` is exactly `dvol`**, set before the `pvol` loop and never
+  accumulated into. So `wetdp` on an insoluble mode is a pure function of
+  `dvol`; the partial volumes just computed do not enter it.
+* **The guarded division at `:665` is guarded by `mask`, not `mask_sol`.**
+  Reusing `:627`'s guard changes `rhopar` at every masked point of an insoluble
+  mode, where `mask_sol` is not computed at all.
+
+The branch also has **no `denom2 <= 0` diagnostic**: the 100-line `ereport`
+block at `:476-575` lives only inside the soluble arm, so `denom2 == 0` at
+`:665` simply divides. The gap is real and unreachable, and provably so -- see
+`test_the_insoluble_branch_has_no_denom2_diagnostic`.
+
+`rhopar` on this branch cannot be shown to be a mass-weighted **mean** by any
+supported setup: no insoluble mode carries two different densities. Mode 5 is
+bc + oc at 1500 each, and modes 6 and 7 are dust alone at 2650. What byte
+equality still tests there is the fold order, since the quotient of two
+rounded sums is not exactly the common density.
+
+The inactive branch's `pvol` default at `:686` is **dead code**.
+`ukca_mode_setup.F90:693-704` sets `mode = (mode_choice > 0)` and makes
+`component(imode,icp)` true only when `mode_choice(imode) == 1`, so `component`
+implies `mode`, while `:686` sits inside `ELSE` on `mode(imode)`. Reproduced and
+asserted dead rather than dropped or "fixed".
+
 ## `mdcopy` and setup 11
 
 `:295` copies `md` into `mdcopy`, and `:356-364` overwrites three of its
@@ -122,9 +156,9 @@ __all__ = [
     "corrected_humidity",
     "ion_concentrations",
     "mdwat",
+    "partial_volumes",
     "solubility_masks",
     "soluble_mass",
-    "soluble_volumes",
     "stratospheric",
 ]
 
@@ -539,7 +573,81 @@ def _soluble_mode(
     }
 
 
-def soluble_volumes(
+def _insoluble_mode(
+    tables: ModeTables,
+    imode: int,
+    nd: Array,
+    md: Array,
+    dvol: Array,
+    scales: _Scales,
+) -> dict:
+    """One insoluble mode (`:638-673`).
+
+    See the module docstring for the three ways this is not the soluble branch
+    with the water removed.
+    """
+    mask = nd[:, imode] > tables.num_eps[imode]
+    dvol_col = dvol[:, imode]
+
+    pvol: dict[int, Array] = {}
+    for icp in range(tables.ncp):
+        if tables.component[imode, icp]:
+            # `:647`: no WHERE and no dvol*mfrac_0 default. Assigned on every
+            # point, including where nd <= num_eps.
+            pvol[icp] = md[:, imode, icp] * scales.mm_ovravcrhocp[icp]
+
+    # `:656-671`. Seeded at 0.0 -- no water term here -- and folded in icp order
+    # under `mask`.
+    rhotmp2 = jnp.zeros(jnp.shape(mask), dtype=jnp.float64)
+    denom2 = jnp.zeros(jnp.shape(mask), dtype=jnp.float64)
+    for icp in range(tables.ncp):
+        if not tables.component[imode, icp]:
+            continue
+        rhotmp2 = rhotmp2 + jnp.where(mask, md[:, imode, icp] * scales.mm_rhocp[icp], 0.0)
+        denom2 = denom2 + jnp.where(mask, md[:, imode, icp] * tables.mm[icp], 0.0)
+
+    # `:665`. The guard is `mask`, a different one from `:579` and `:627`, and
+    # it guards on the MASK and not on `denom2 != 0`: a masked point with
+    # denom2 exactly zero divides here, in the port as in the reference, because
+    # this branch has no diagnostic to stop it.
+    rhopar = jnp.where(mask, numerics.safe_divide(rhotmp2, denom2, mask), RHO_SO4)
+
+    zero = jnp.zeros(jnp.shape(mask), dtype=jnp.float64)
+    return {
+        "mdwat": zero,
+        "wvol": dvol_col,
+        "rhopar": rhopar,
+        "pvol": pvol,
+        "pvol_wat": zero,
+        "mask": mask,
+    }
+
+
+def _inactive_mode(tables: ModeTables, imode: int, dvol: Array) -> dict:
+    """One absent mode (`:675-690`).
+
+    `pvol_wat = 0`, `wvol = dvol`, `mdwat = 0`, `rhopar = rho_so4`, all
+    unconditional -- no `mask` is even computed here. The `pvol` default at
+    `:686` is dead code; it is written anyway, and the tests assert it can never
+    execute.
+    """
+    dvol_col = dvol[:, imode]
+    zero = jnp.zeros_like(dvol_col)
+    pvol = {
+        icp: dvol_col * tables.mfrac_0[imode, icp]
+        for icp in range(tables.ncp)
+        if tables.component[imode, icp]
+    }
+    return {
+        "mdwat": zero,
+        "wvol": dvol_col,
+        "rhopar": jnp.full_like(dvol_col, RHO_SO4),
+        "pvol": pvol,
+        "pvol_wat": zero,
+    }
+
+
+def partial_volumes(
     tables: ModeTables,
     nd: Array,
     md: Array,
@@ -552,11 +660,11 @@ def soluble_volumes(
     fix_water_content: bool,
     fix_neg_pvol_wat: bool,
 ) -> tuple[Array, Array, Array, Array, Array]:
-    """`(mdwat, wvol, rhopar, pvol, pvol_wat)` for the **soluble** modes only.
+    """`(mdwat, wvol, rhopar, pvol, pvol_wat)` for every mode.
 
-    Columns for an insoluble mode (`:638`) or an absent one (`:675`) are left at
-    zero rather than guessed -- those branches are task 44 -- so only
-    `modesol == 1` columns are meaningful here.
+    The mode loop of `:310-692`, all three branches. `wetdp` is not here: it is
+    computed after the loop closes, over the whole array at once, and belongs to
+    task 45.
 
     `t`, `pmid` and `s` enter for one purpose: the `ukca_vapour` call at `:287`,
     whose two results are read only inside the two `pmid < putls` blocks. The
@@ -573,30 +681,28 @@ def soluble_volumes(
     wts, rhosol_strat = vapour(t, pmid, s, fix_neg_pvol_wat=fix_neg_pvol_wat)
     strat = stratospheric(pmid)
     nbox = nd.shape[0]
-    zero = jnp.zeros((nbox,), dtype=jnp.float64)
 
     mdwat_cols, wvol_cols, rhopar_cols, pvol_wat_cols = [], [], [], []
     pvol = jnp.zeros((nbox, NMODES, tables.ncp), dtype=jnp.float64)
     for imode in range(NMODES):
-        if not bool(tables.mode[imode]) or tables.modesol[imode] != 1:
-            mdwat_cols.append(zero)
-            wvol_cols.append(zero)
-            rhopar_cols.append(zero)
-            pvol_wat_cols.append(zero)
-            continue
-        out = _soluble_mode(
-            tables,
-            imode,
-            nd,
-            md,
-            dvol,
-            corrh,
-            scales,
-            strat,
-            wts,
-            rhosol_strat,
-            fix_water_content=fix_water_content,
-        )
+        if not bool(tables.mode[imode]):
+            out = _inactive_mode(tables, imode, dvol)
+        elif tables.modesol[imode] != 1:
+            out = _insoluble_mode(tables, imode, nd, md, dvol, scales)
+        else:
+            out = _soluble_mode(
+                tables,
+                imode,
+                nd,
+                md,
+                dvol,
+                corrh,
+                scales,
+                strat,
+                wts,
+                rhosol_strat,
+                fix_water_content=fix_water_content,
+            )
         mdwat_cols.append(out["mdwat"])
         wvol_cols.append(out["wvol"])
         rhopar_cols.append(out["rhopar"])
