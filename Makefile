@@ -61,6 +61,7 @@ capture:
 	$(PY) validation/capture_gas_indices.py
 	$(PY) validation/capture_budget_indices.py
 	$(PY) validation/capture_coag_mode.py
+	$(PY) validation/capture_vapour_leaf.py
 
 # Regenerate, then REPORT. This target used to end in `--write`, so the one
 # command that rewrites every golden also re-blessed every one of them --
