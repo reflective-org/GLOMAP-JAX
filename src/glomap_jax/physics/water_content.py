@@ -47,6 +47,14 @@ becomes live and the port should already be right.
 * The polynomial is accumulated term by term in ascending order, `mb += y[k] *
   aw**k`, exactly as `:286-293` writes it. Not Horner, not `polyval`: both
   associate differently. `aw**0` is written and contributes `y[0]*1.0`.
+* **The powers come from `powi`, not from `**`.** gfortran expands an integer
+  literal exponent through GCC's `powi` chain, and `jnp`'s `x**5` and `x**6`
+  disagree with that chain on 35% and 55% of the live range. This was missed
+  when the routine was first ported: task 40's grid swept `rh` at six values
+  and none of them happened to be one of the disagreements, so the port passed
+  a byte-equality gate it did not meet. `aw = 0.9` and `aw = 0.47` -- the
+  humidity clamp and the Na+/Cl- floor -- are both disagreements, and
+  `test_volume_mode.py` reaches them.
 * `MIN(mb, molal_max)` goes through `numerics.fortran_min` -- gfortran's `MIN`
   returns its first argument on a NaN second, `jnp.minimum` propagates.
 * The ZSR sum `dum += clp/mb` is an ordered fold over pairs in the same
@@ -77,7 +85,7 @@ from jax import Array
 from ..core import numerics
 from . import water_tables as wt
 
-__all__ = ["ION_CHARGE", "NCOEFF", "PAIRS", "stoichiometry", "water_content"]
+__all__ = ["ION_CHARGE", "NCOEFF", "PAIRS", "powi", "stoichiometry", "water_content"]
 
 # ukca_water_content_v.F90:132, DATA (z(i),i=-nanion,ncation).
 # Index -4..3 maps to 0..7 through wt.ion_slot.
@@ -129,6 +137,38 @@ def _pair_concentrations(cl: Array, ions: Array, mask: Array):
     return clp, present
 
 
+def powi(x: Array) -> tuple[Array, ...]:
+    """`x**0 .. x**7` as gfortran expands an integer literal exponent.
+
+    GCC lowers a constant integer exponent through its `powi` table, which is a
+    specific chain of multiplications and **not** what any `pow` computes:
+
+        p2 = x*x   p3 = x*p2   p4 = p2*p2   p5 = p2*p3   p6 = p3*p3   p7 = p3*p4
+
+    Measured over 200,000 samples in [0.1, 0.95] against that chain: `jnp`'s
+    `x**k` agrees for k in {0,1,2,3,4,7} and disagrees on **69,691 (34.8%)** of
+    points for `x**5` and **109,311 (54.7%)** for `x**6`. `numpy`'s `**`
+    disagrees for every k from 3 to 7.
+
+    That gap is live, not theoretical. `aw = 0.9` -- the top of the box model's
+    admissible humidity range and the value `corrh` clamps to -- is one of the
+    `x**5` disagreements, and `aw = 0.47` -- the Na+/Cl- `rh_min` floor, which
+    every sub-47% humidity is raised to -- is one of the `x**6` disagreements.
+    Both reach `wc` at a relative 1.2e-11, which is 1e11 times the byte
+    equality this port is gated on.
+
+    `x**0` is 1.0 for every `x` including 0.0 in Fortran, so the chain starts
+    from a literal one rather than emitting a `pow` that would NaN.
+    """
+    p2 = x * x
+    p3 = x * p2
+    p4 = p2 * p2
+    p5 = p2 * p3
+    p6 = p3 * p3
+    p7 = p3 * p4
+    return (jnp.ones_like(x), x, p2, p3, p4, p5, p6, p7)
+
+
 def _molalities(rh: Array, present, *, fix_water_content: bool):
     """Binary electrolyte molalities (`:270-321`).
 
@@ -149,9 +189,10 @@ def _molalities(rh: Array, present, *, fix_water_content: bool):
             aw = jnp.where(aw < floor, floor, aw)
             pair_aw = aw
 
+        powers = powi(pair_aw)
         value = jnp.zeros_like(pair_aw)
         for k in range(NCOEFF):
-            value = value + coefficients[row, col, k] * pair_aw**k
+            value = value + coefficients[row, col, k] * powers[k]
         value = numerics.fortran_min(value, wt.LIMITS_TABLE[row, col, 1])
         mb[(cation, anion)] = jnp.where(present[(cation, anion)], value, 0.0)
 
