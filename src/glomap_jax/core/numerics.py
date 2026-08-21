@@ -111,6 +111,42 @@ def nint(x: Array) -> Array:
     return jnp.sign(x) * rounded
 
 
+def fortran_max(a: Array, b: Array) -> Array:
+    """Fortran ``MAX(a, b)``, including what it does with a ``NaN``.
+
+    ``jnp.maximum`` and ``np.maximum`` propagate ``NaN``. gfortran does not: it
+    lowers ``MAX(a, b)`` to ``(b > a) ? b : a``, so a ``NaN`` *second* argument
+    yields the first. Measured against the compiled routine, not assumed --
+    ``ukca_vapour.F90:188`` computes ``MAX(41.0, ws*100.0)`` and returns
+    **41.0** at the one grid point where ``ws`` is ``NaN``, where
+    ``jnp.maximum`` gives ``NaN``.
+
+    That point is not exotic. At T = 303.6479444122756 K the Ayers denominator
+    ``b = ks3 + ks4/T`` is *exactly* zero, so ``d = a*a`` exactly,
+    ``SQRT(d) = -a`` exactly, the numerator is exactly ``0.0``, and ``xsb`` is
+    ``0/0``. The whole solution collapses to ``NaN`` and the clamp is what
+    rescues it -- so reproducing the clamp's ``NaN`` behaviour is reproducing
+    the answer, not an edge case.
+
+    Asymmetric on purpose: ``fortran_max(nan, 41.0)`` is 41.0 too, because
+    ``41.0 > nan`` is false and the expression returns ``a``... which is
+    ``nan``. Write the arguments in the Fortran's order.
+    """
+    return jnp.where(b > a, b, a)
+
+
+def fortran_min(a: Array, b: Array) -> Array:
+    """Fortran ``MIN(a, b)``: ``(b < a) ? b : a``, mirroring `fortran_max`.
+
+    Unexercised in the current port -- ``ukca_vapour.F90:184``'s
+    ``MIN(99.0, MAX(...))`` can only see a ``NaN`` if ``MAX`` produced one, and
+    it cannot. Provided anyway so the pair is used consistently rather than one
+    routine reaching for `jnp.minimum` because its ``NaN`` case looked
+    unreachable at the time.
+    """
+    return jnp.where(b < a, b, a)
+
+
 def vapour_round(x: Array) -> Array:
     """``ukca_vapour.F90:226`` exactly: ``(NINT(wts/5))*5``.
 
@@ -151,4 +187,13 @@ def masked_sum(term: Array, where: Array, axis: int | None = None) -> Array:
     return jnp.sum(jnp.where(where, term, 0.0), axis=axis)
 
 
-__all__ = ["cbrt", "erf", "masked_sum", "nint", "safe_divide", "vapour_round"]
+__all__ = [
+    "cbrt",
+    "erf",
+    "fortran_max",
+    "fortran_min",
+    "masked_sum",
+    "nint",
+    "safe_divide",
+    "vapour_round",
+]
