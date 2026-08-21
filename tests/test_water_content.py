@@ -83,10 +83,23 @@ def _grid():
     unfixed arm's ratchet observable: there the floor raises `aw` permanently
     for every later pair, while the fixed arm re-reads the original humidity.
     """
+    # The humidity axis is DENSE, and that is the point.
+    #
+    # This file first shipped with six humidity values and claimed byte
+    # equality. The claim was false: the port evaluated the ZSR polynomial as
+    # `aw**k`, while gfortran expands an integer literal exponent through GCC's
+    # powi chain, and `jnp`'s `x**5` and `x**6` disagree with that chain on 35%
+    # and 55% of the live range. None of the six values happened to be a
+    # disagreement. On this grid, 481 of 1301 points differ -- so the test that
+    # passed was a test that could not fail for the thing that was wrong.
+    #
+    # Six well-chosen values are not a substitute for sweeping the axis a
+    # polynomial is evaluated over.
     rows = []
+    humidities = [round(v, 3) for v in np.arange(0.0, 1.301, 0.017)]
     for combo in range(1 << len(BOX_SPECIES)):
         for magnitude in (1e-20, 1e-16, 1e-13, 1e-11):
-            for rh in (0.02, 0.19, 0.35, 0.5, 0.62, 0.85):
+            for rh in humidities:
                 cl = np.zeros(8)
                 ions = np.zeros(8, dtype=np.int32)
                 for bit, species in enumerate(BOX_SPECIES):
@@ -97,7 +110,7 @@ def _grid():
 
     # Nitrate: pair (1,-3) is the only one the patched coefficient touches, and
     # it is dead through the box caller because ncp = 6 while cp_no3 = 7.
-    for rh in (0.05, 0.3, 0.7):
+    for rh in humidities:
         cl = np.zeros(8)
         ions = np.zeros(8, dtype=np.int32)
         for species in (1, -3):
