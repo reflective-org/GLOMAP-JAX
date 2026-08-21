@@ -354,7 +354,7 @@ Filed rather than fixed: #19 (uninitialised index variables), #20 (dead
 `ukca_mode_allcp_4mode`, where citations drift), #21 (ADR-008's benchmark is
 not committed, so its table cannot be re-derived).
 
-## Phase D — size, water and volume: **9/12**
+## Phase D — size, water and volume: **complete (12/12)**
 
 | # | Task | Commit |
 |---|---|---|
@@ -369,8 +369,10 @@ not committed, so its table cannot be re-derived).
 | 39 | The two ZSR ion tables | `3b858ec` |
 | 40 | `water_content_v` | `9fd9cbb` |
 
-Remaining: 35c (water fixture, in flight), and 41–45 (`volume_mode`, strictly
-serial on one file).
+| 35c | Water-content fixture | `e5dbd2b` |
+| 41–45 | `volume_mode`, in five commits | `952a1d5`…`6ec08a9`, `ed0e696` |
+
+**2320 tests pass**, CI green on ubuntu x86_64 and macOS arm64.
 
 **Every port is byte-equal to the compiled routine**, not to a tolerance. Three
 of the plan's acceptance criteria were unfailable as written and were tightened
@@ -409,6 +411,28 @@ zero, `xsb` is `0/0` and everything downstream is `NaN` until
 language property: measured 41.0 at `-O0` through `-O3` under this project's
 flags, but a probe without `-fdefault-real-8` returned `NaN` at `-O2`. What
 `numerics.fortran_max` reproduces is `TOOLCHAIN.txt`.
+
+**Two ports shipped a byte-equality claim they did not meet, and both were
+caught by the next task rather than by their own tests.**
+
+Task 40 evaluated the ZSR polynomial as `aw**k`, while gfortran expands an
+integer literal exponent through GCC's powi chain — `jnp`'s `x**5` and `x**6`
+disagree with it on 35% and 55% of the live range, and the six-value humidity
+grid happened to miss every one. On a dense sweep the pre-fix port differs on
+481 of 1301 points while passing all eight of its tests.
+
+Tasks 41–45 were validated on the wrong interpreter — pyenv's jax 0.9.2 rather
+than `.venv`'s 0.11.0, which `Makefile:18` makes canonical — and failed 73
+tests when merged. That exposed the larger finding: **XLA rewrites
+`divide(x, c)` into `multiply(x, 1/c)` for any scalar constant**, eagerly and
+version-dependently, so a port validated on 0.9.2 loses byte equality at every
+such site on 0.11.0. `numerics.true_divide` defeats it;
+`lax.optimization_barrier` does not. Two sites in the earlier ports were
+exposed and fixed, both inert today and one of them a table index.
+
+Both failures share a shape: a grid too coarse for the defect it had to catch.
+That is the standing risk in every "byte-equal" claim in this phase, and the
+reason each port's grid now sweeps the axis rather than sampling it.
 
 **UP-11 is a crash, not a truncation.** Writing the five-way negative-size
 diagnostic into its 256-character buffer gives "Fortran runtime error: End of
