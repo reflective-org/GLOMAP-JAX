@@ -64,6 +64,7 @@ capture:
 	$(PY) validation/capture_vapour_leaf.py
 	$(PY) validation/capture_drydiam_leaf.py
 	$(PY) validation/capture_volume_mode_leaf.py
+	$(PY) validation/capture_water_leaf.py
 
 # Regenerate, then REPORT. This target used to end in `--write`, so the one
 # command that rewrites every golden also re-blessed every one of them --
