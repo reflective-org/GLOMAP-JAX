@@ -1,6 +1,6 @@
 ! *****************************COPYRIGHT*******************************
 ! (c) 2026. Validation instrumentation for the GLOMAP-JAX port.
-! New code, BSD 3-Clause (see LICENCE). Not part of UKCA.
+! New code, BSD 3-Clause (see fortran/LICENCE). Not part of UKCA.
 ! *****************************COPYRIGHT*******************************
 !
 ! Description:

@@ -119,7 +119,7 @@ diff --color -ruN a/src/box/glomap_branch_mod.F90 b/src/box/glomap_branch_mod.F9
 @@ -0,0 +1,135 @@
 +! *****************************COPYRIGHT*******************************
 +! (c) 2026. Validation instrumentation for the GLOMAP-JAX port.
-+! New code, BSD 3-Clause (see LICENCE). Not part of UKCA.
++! New code, BSD 3-Clause (see fortran/LICENCE). Not part of UKCA.
 +! *****************************COPYRIGHT*******************************
 +!
 +! Description:
