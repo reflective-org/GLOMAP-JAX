@@ -433,3 +433,98 @@ soluble modes — so neither enters `ukca_coagwithnucl`'s insoluble blocks,
 `ukca_ageing`, or the insoluble condensation path. `marine_bcoc` is setup 2 and
 is the smallest shipped case that reaches every instrumented site. Any test
 meant to cover insoluble-mode behaviour has to use it.
+
+## `ukca_cond_coff_v`'s switches select which *arguments* are read (task 46)
+
+Not just which formula. Measured over the leaf sweep, and asserted as byte
+equalities between calls that differ in one argument alone:
+
+| argument | `idcmfp = 1` | `idcmfp = 2` |
+|---|---|---|
+| `tsqrt` | read (`vel_cp` `:171`, `dcoff_cp` `:174`) | read (`vel_cp`, then `mfp_cp` `:181`) |
+| `rp` | read | read |
+| `rhoa` | read (`:174`) | **not read** |
+| `airdm3` | read (`:177`) | **not read** |
+| `t` | **not read** | read (`:179`) |
+| `pmid` | **not read** | read (`:179`) |
+| `dmol` | read (`term2` `:154`, `term3` `:157`) | **not read** |
+| `difvol` | **not read** | read (`term8` `:167`) |
+
+Every shipped namelist and every scenario in `inputs/` runs `ifuchs = 1` and
+`idcmfp = 1`, so the branch dump covers one corner of a 2x2 and three of the
+four closed forms have no trajectory reference at all.
+
+`tsqrt` and `t` are separate arguments and the callee never checks that they
+agree. `ukca_conden.F90:281` passes `SQRT(t)`, but a leaf call can pass
+`tsqrt = SQRT(t_b)` with `t = 999.0` — and at `idcmfp = 1` the result is
+byte-equal to the consistent `t_b` row. That is "`t` is unread", not "`t` did
+not matter much on this grid", and it is the kind of claim only a leaf driver
+can make.
+
+## `se = 1.0` switches off the term that defines the Fuchs-Sutugin branch
+
+`akn = 1.0/(1.0 + 1.33*kn*fkn*(1.0/se - 1.0))` (`ukca_cond_coff_v.F90:210`) is
+the only place `se` reaches `ifuchs = 2`. `ukca_conden.F90:235-237` sets
+`se_sol` and `se_ins` both to `1.0`, so `1.0/se - 1.0` is **exactly** `0.0` and
+`akn` is exactly `1.0` on every row of every configuration. `cc` reduces to
+`term6*dcoff_cp*rp*fkn`, and the correction for limitations in interfacial mass
+transport does nothing.
+
+Both the routine's own header (`:60`) and `ukca_conden`'s (`:53`) document `se`
+as `0.3`, where `1.0/se - 1.0 = 2.333...` and `akn` depends on
+`kn = mfp_cp/rp` — so it varies along the size distribution rather than
+scaling it. Over the sweep's rp axis (1e-10 to 2e-5 m) the `se = 0.3` answer is
+**0.3002 to 0.9954** of the `se = 1.0` answer, a factor spanning 3.32 across
+radii.
+
+The lower end is not a coincidence and is worth stating as a check on the
+reading: as `kn -> inf`, `fkn -> 1/(1.33*kn)` (`:208`), so `1.33*kn*fkn -> 1`
+and `akn -> 1/(1 + (1/se - 1)) = se`. The smallest particles lose exactly the
+factor `se`; the largest lose nothing. UP-9 records the header discrepancy as
+documentation-only and does not say any of this; issue #27.
+
+## The `pmid` axis is chosen to be able to see the reciprocal rewrite
+
+`ukca_cond_coff_v.F90:179` divides an array by a scalar literal,
+`pmid(:)/101325.0` — the site XLA rewrites into a multiply by `1/101325.0`.
+Of twelve plausible pressures only **two**, `9.0e4` and `1.05e5`, give a
+different double under the rewrite. So a grid of round pressures passes against
+a port that has it, which is the same shape as the phase-D failures: a six-value
+humidity grid that missed the powi chain on 481 of 1301 points.
+
+The axis carries seven discriminating values, and the count is re-derived by
+`tests/test_cond_coff_fixtures.py` rather than trusted. With the guard removed,
+12 of the 12 `idcmfp = 2` calls lose byte equality and none of the 12
+`idcmfp = 1` calls move — they read no pressure at all.
+
+## The double-`where` idiom does not save a poisoned numerator
+
+`numerics.safe_divide` substitutes a safe *denominator*, which is what makes a
+masked division differentiable. It does nothing about a numerator that is
+already `inf` or `NaN`.
+
+At `ifuchs = 1` the numerator of `cc` is `term6*dcoff_cp*rp`. On a masked row
+`dcoff_cp` is `0.0` (`safe_divide` zeroes it) and the fixture's `rp` is `inf`,
+so the product is `NaN`, and `jax.grad` returns a non-finite cotangent on 4 of
+the 7 masked rows. At `ifuchs = 2` the same product is formed without a
+division around it and all 7 are finite. Every **live** row is finite at all
+four switch settings.
+
+No model state can produce those inputs — `rp` is a wet radius — so this is a
+property of the fixture's deliberate poison, not of the physics. It is asserted
+at exactly 4 so that a later phase needing clean cotangents through an
+arbitrary masked box knows the cost is masking the inputs, not the divisions.
+
+## `ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` have no reference
+
+They are coefficient kernels of the same shape as `cond_coff` and `coag_coff` —
+moment-averaged over a log-normal, both 129 lines, both closed-form — and
+neither is in phase E. Their only callers are `ukca_ddepaer_mod` and
+`ukca_ddepaer_incl_sedi_mod`, and `glomap_box.F90:144` passes `ddepaer = 0` and
+`sedi = 0`. There is no validated trajectory that enters either, so porting
+them would be a physics commit with nothing to check it against.
+
+A leaf fixture could be built for them without dry deposition — they take no
+`glomap_variables` — but the routines they feed cannot be validated at all, so
+the coefficient would be a leaf with no tree. Left out until dry deposition is
+in scope; see `docs/unsupported.md`.

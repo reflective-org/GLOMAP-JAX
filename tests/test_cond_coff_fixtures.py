@@ -227,10 +227,17 @@ def test_the_interfacial_correction_is_rp_dependent_only_away_from_se_one(sweep,
     ratio = sweep["cc"][0, b, rows] / sweep["cc"][0, a, rows]
     span = ratio.max() / ratio.min()
     assert np.all(ratio < 1.0), "a lower sticking efficiency must lower the coefficient"
-    assert span > 1.5, (
-        f"the se=0.3 / se=1.0 ratio spans only {span:.4f} across the rp axis; "
-        "akn is not behaving as a function of kn"
+    assert 3.0 < span < 3.7, (
+        f"the se=0.3 / se=1.0 ratio spans {span:.4f} across the rp axis, measured "
+        "3.3157; a moved grid or a changed formula"
     )
+    # The asymptote is a check on the reading, not a coincidence: as kn -> inf,
+    # fkn -> 1/(1.33*kn) (`:208`), so 1.33*kn*fkn -> 1 and
+    # akn -> 1/(1 + (1/se - 1)) = se. The smallest particles lose exactly the
+    # factor se and the largest lose nothing, so the ratio is bounded below by
+    # se and above by 1 -- strictly, at both ends.
+    assert 0.3 < ratio.min() < 0.31, f"ratio floor {ratio.min():.6f} is not approaching se = 0.3"
+    assert 0.99 < ratio.max() < 1.0, f"ratio ceiling {ratio.max():.6f} is not approaching 1.0"
 
 
 def test_cc_over_sinkarr_carries_no_rp(sweep, grid, calls):

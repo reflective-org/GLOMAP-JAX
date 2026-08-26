@@ -448,7 +448,93 @@ have reference data: the stratospheric override (all four namelists run above
 relative-humidity clamps. The undersize reset is 0 of 3456 `undersize` records
 across all four branch dumps and is now reached by constructed inputs.
 
-## Phases E–K — physics: not started
+## Phase E — the coefficient kernels: **in progress (2 of ~6)**
+
+| # | Task | Commit |
+|---|---|---|
+| 46 | `ukca_cond_coff_v` leaf fixture | `466cb23` |
+| 47 | `ukca_cond_coff_v`, byte-equal | `0fe1f7f` |
+
+**2394 tests pass.** The port is byte-equal to the compiled routine on 24 calls
+x 259 rows x 2 outputs, on the first comparison — worth stating because the
+previous two ports each shipped a byte-equality claim they did not meet and
+were caught by the next task rather than by their own tests.
+
+### The switches select which *arguments* are read, not just which formula
+
+Every shipped namelist and every scenario in `inputs/` runs `ifuchs = 1` and
+`idcmfp = 1`, so the branch dump covers **one corner of a 2x2** and three of
+the four closed forms have no trajectory reference at all. What the leaf sweep
+buys is not more points, it is the argument map: `rhoa`, `airdm3` and `dmol` are
+read at `idcmfp = 1` only; `t`, `pmid` and `difvol` at `idcmfp = 2` only. Six
+cells are asserted as byte equalities between calls differing in one argument
+alone, each paired with a byte *inequality* at the other setting — only the
+second half can fail if a call never reached the Fortran.
+
+`tsqrt` and `t` are separate arguments and the callee never checks that they
+agree, so one block feeds `tsqrt = SQRT(t_b)` with `t = 999.0` and requires the
+result to be byte-equal to the consistent `t_b` row at `idcmfp = 1`. That is
+"`t` is unread", not "`t` did not matter much on this grid".
+
+### `se = 1.0` switches off the term that defines the Fuchs-Sutugin branch
+
+`akn = 1.0/(1.0 + 1.33*kn*fkn*(1.0/se - 1.0))` (`:210`) is the only place `se`
+reaches `ifuchs = 2`, and `ukca_conden.F90:235-237` sets both `se_sol` and
+`se_ins` to `1.0` — so `1.0/se - 1.0` is **exactly** `0.0`, `akn` is exactly
+`1.0`, and the interfacial-transport correction does nothing in any
+configuration. Both the routine's header (`:60`) and `ukca_conden`'s (`:53`)
+document `se = 0.3`, where the correction spans a factor of 3.32 across the
+size range and bottoms out at exactly `se`. UP-9 records the header
+discrepancy as documentation-only and does not say this: issue #27.
+
+### Two hazards, both proven load-bearing by mutation
+
+**The divide-by-a-constant rewrite is live at `:179`.** Removing
+`numerics.true_divide` breaks 12 of the 12 `idcmfp = 2` calls and disturbs none
+of the 12 `idcmfp = 1` calls. Of twelve plausible pressures only **two** see the
+difference, so the axis was chosen to carry seven that do — the phase-D lesson
+about grids too coarse for the defect they must catch, applied in advance rather
+than after.
+
+That mutation test also caught its own first draft: written
+`np.asarray(pmid) / c` it found one difference, the NaN row comparing unequal to
+itself, because numpy divides and it is XLA that rewrites.
+
+**The double-`where` idiom does not save a poisoned numerator.** `safe_divide`
+substitutes a safe denominator, so every live row has a finite cotangent at all
+four settings. At `ifuchs = 1` the numerator of `cc` is `term6*dcoff_cp*rp`,
+which is `0.0*inf` on a masked fixture row, and 4 of the 7 come back non-finite;
+at `ifuchs = 2` none do. No model state can produce those inputs, so it is a
+property of the fixture's poison — pinned at exactly 4 so a later phase needing
+clean cotangents through an arbitrary masked box knows the cost is masking the
+inputs, not the divisions.
+
+### Refused rather than captured
+
+`ifuchs` and `idcmfp` outside `{1,2}` return `ierr = 3` from the leaf driver and
+`ValueError` from the port. Neither switch is validated anywhere upstream:
+`glomap_box_config_mod.F90:155` reads both from the namelist and
+`validate_config` constrains neither. Out of range, `idcmfp` leaves `dcoff_cp`
+**never assigned** while both Fuchs branches read it, and `ifuchs` silently
+returns `cc = 0` — no condensation at all, no `ereport`. Capturing the first
+would commit uninitialised memory as a reference, stable enough within a process
+to pass every byte-equality test written against it. Issue #26.
+
+### Out of phase E, and why
+
+`ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` are coefficient kernels of the same
+shape — moment-averaged over a log-normal, 129 lines each, closed-form — and
+are **not** ported. Their only callers are the two `ukca_ddepaer` modules, and
+`glomap_box.F90:144` passes `ddepaer = 0` and `sedi = 0`, so no validated
+trajectory enters either. Porting them would be a physics commit with nothing
+to validate it against, which is the ordering rule CLAUDE.md names as the one
+most likely to break under time pressure.
+
+Remaining in phase E: `ukca_coag_coff_v`, the `ukca_calc_coag_kernel` driver
+over mode pairs (which needs `lax.scan` for the `icp` loop only in
+`coagwithnucl`, not here), and their fixtures.
+
+## Phases F–K — physics: not started
 
 ## Orders 2 and 3: not started
 
