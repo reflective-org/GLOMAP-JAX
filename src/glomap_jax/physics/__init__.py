@@ -38,7 +38,10 @@ hard-codes the Vehkamaki method, so the Kulmala branch beside it is dead code.
 Its 113 polynomial coefficients are machine-extracted into
 `_binapara_literals.py`, and the capture validates that extraction by
 reproducing the compiled routine bit for bit from them in numpy before it
-writes a golden.
+writes a golden. `nucleation.py` (`ukca_calcnucrate`) is the driver over it:
+two logicals, not two switches, decide whether the binary term, the
+boundary-layer term or both run, and the boundary-layer term reads the H2SO4
+the binary one left behind.
 
 `ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` are NOT part of this phase despite
 being coefficient kernels of the same shape. Their only callers are

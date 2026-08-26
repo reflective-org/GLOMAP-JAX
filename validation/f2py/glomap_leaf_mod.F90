@@ -631,6 +631,65 @@ CALL ukca_binapara(n, t, rh, h2so4, jveh, rc)
 END SUBROUTINE leaf_binapara
 
 
+SUBROUTINE leaf_calcnucrate(n, dtz, t, s, rh, aird, h2so4_in, sec_org,         &
+                            height, htpblg, s_cond_s, bln_on, ibln,            &
+                            i_nuc_method, h2so4_out, delh2so4_nucl, ierr)
+! ukca_calcnucrate takes h2so4 as INTENT(IN OUT) and rewrites it in place, so
+! the driver copies in and hands both the updated concentration and the
+! reported change back out. A capture that passed the same array twice would
+! record the routine's effect on its own input.
+!
+! Setup-independent: it reads no glomap table, only its own PARAMETERs and the
+! two shared constants conc_eps and nmol. Measured as such, like the other
+! leaves.
+!
+! i_nuc_method AND ibln ARE REFUSED OUT OF RANGE. The routine itself checks
+! them at :288-293 and calls ereport -- but ereport under this binding is the
+! shim, which RETURNS where the real one does STOP 1, so the routine would
+! carry on into a branch with dpbln never assigned (:271 sets it only for
+! ibln in 1..3) and produce a plausible number from uninitialised memory. The
+! guard here is what stops that reaching a golden. ModelConfig rejects the
+! same values.
+!
+! bln_on is NOT refused: 0 and 1 are both supported configurations and the
+! switch selects a whole branch (l1 at :302), so both are swept.
+USE ukca_calcnucrate_mod, ONLY: ukca_calcnucrate
+USE glomap_f2py_state,    ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, bln_on, ibln, i_nuc_method
+REAL(KIND=8), INTENT(IN)  :: dtz
+REAL(KIND=8), INTENT(IN)  :: t(n), s(n), rh(n), aird(n), h2so4_in(n)
+REAL(KIND=8), INTENT(IN)  :: sec_org(n), height(n), htpblg(n), s_cond_s(n)
+REAL(KIND=8), INTENT(OUT) :: h2so4_out(n), delh2so4_nucl(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+h2so4_out     = 0.0
+delh2so4_nucl = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (i_nuc_method /= 2 .AND. i_nuc_method /= 3) THEN
+  ierr = 3
+  RETURN
+END IF
+IF (ibln < 1 .OR. ibln > 3) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+h2so4_out = h2so4_in
+CALL ukca_calcnucrate(n, dtz, t, s, rh, aird, h2so4_out, delh2so4_nucl,        &
+                      sec_org, bln_on, ibln, i_nuc_method, height, htpblg,     &
+                      s_cond_s)
+END SUBROUTINE leaf_calcnucrate
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !
