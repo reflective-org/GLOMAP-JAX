@@ -22,9 +22,11 @@ Phase D is complete: `drydiam.py`, `vapour.py`, `water_content.py` (with
 `water_tables.py`) and `volume_mode.py`, every one byte-equal to the compiled
 routine.
 
-Phase E is in progress: `cond_coff.py` is the condensation coefficient
-(`ukca_cond_coff_v`). The coagulation side -- `ukca_coag_coff_v` and the
-`ukca_calc_coag_kernel` driver over mode pairs -- is next.
+Phase E is in progress: `cond_coff.py` (`ukca_cond_coff_v`) and `coag_coff.py`
+(`ukca_coag_coff_v`) are ported and byte-equal. The `ukca_calc_coag_kernel`
+driver over mode pairs is next, and it carries the ordering risk: the kernel is
+byte-symmetric under an (i,j) swap and `coag_mode` is symmetric on all 64
+entries, so nothing below the driver's own subscripts catches a transposition.
 
 `ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` are NOT part of this phase despite
 being coefficient kernels of the same shape. Their only callers are
