@@ -22,11 +22,15 @@ Phase D is complete: `drydiam.py`, `vapour.py`, `water_content.py` (with
 `water_tables.py`) and `volume_mode.py`, every one byte-equal to the compiled
 routine.
 
-Phase E is in progress: `cond_coff.py` (`ukca_cond_coff_v`) and `coag_coff.py`
-(`ukca_coag_coff_v`) are ported and byte-equal. The `ukca_calc_coag_kernel`
-driver over mode pairs is next, and it carries the ordering risk: the kernel is
-byte-symmetric under an (i,j) swap and `coag_mode` is symmetric on all 64
-entries, so nothing below the driver's own subscripts catches a transposition.
+Phase E is in progress: `cond_coff.py` (`ukca_cond_coff_v`), `coag_coff.py`
+(`ukca_coag_coff_v`) and `coag_kernel.py` (`ukca_calc_coag_kernel`) are ported.
+
+`coag_kernel.py` is where the project's byte-equality gate first runs out.
+`ukca_coag_coff_v.F90:266` calls `EXP`, `jnp.exp` is XLA's own evaluation while
+gfortran's goes to the platform libm, and 42 of the driver's 3,690 non-zero
+outputs differ by up to 3 ulp because of it. Substituting `numpy.exp` removes
+every one. `icoag = 3`, which reaches no exponential, stays byte-equal. Issue
+#28.
 
 `ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` are NOT part of this phase despite
 being coefficient kernels of the same shape. Their only callers are

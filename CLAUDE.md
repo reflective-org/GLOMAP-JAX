@@ -159,7 +159,7 @@ Measured over 15,382 points against the Fortran itself
 | | JAX vs gfortran |
 |---|---|
 | `erf`, `log`, `1/x`, `x**(1/3)` | **bit-identical on the capture platform** (arm64); `erf` and the powers drift ≤2 ulp on x86_64 |
-| `exp` | 456/3199 differ, max 2.1e-16 — 1 ulp, inside tolerance |
+| `exp` | 456/3199 differ, max 2.1e-16 — 1 ulp, inside `RTOL_TRANSCENDENTAL` and **outside byte equality**: `jnp.exp` is XLA's own evaluation, `numpy.exp` and gfortran's both reach the platform libm. A routine with `EXP` in a live path cannot be gated with `array_equal` (issue #28) |
 | `jnp.cbrt` | 1763/1865 differ on arm64, 1793 on x86_64, max 1.3e-14 — **do not use** |
 | `jnp.round` | 64 of 129 ties differ — **do not use** |
 

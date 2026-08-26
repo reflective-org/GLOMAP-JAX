@@ -31,6 +31,16 @@ currently free:
   this file has already been bitten once by an expression whose result depended
   on whether the array was numpy or jnp.
 
+**The byte equality below is narrower than it looks, and task 50 found out how.**
+`ukca_coag_coff_v.F90:266` calls `EXP`, and `jnp.exp` is XLA's own evaluation
+while gfortran's `EXP` goes to the platform libm. On this grid they disagree on
+5 of the 25 distinct arguments method 1 evaluates and 22 of the 95 method 2
+does -- and every row here is still byte-equal, because the 1-ulp gap is
+absorbed by the `1.257 + 0.4*EXP(...)` sum. On `ukca_calc_coag_kernel`'s grid it
+is not absorbed on 42 elements. So what this file demonstrates is that the port
+agrees with the Fortran *on these inputs*, not that it agrees. See
+`tests/test_coag_kernel.py` and issue #28.
+
 And one property that is a warning rather than a reassurance: the port is
 byte-symmetric under a simultaneous swap of the three `(i, j)` pairs. So is the
 Fortran. Neither can distinguish `kij` from `kji`, and neither can `coag_mode`,
@@ -168,6 +178,32 @@ def test_the_cube_spelling_is_free_in_jax_and_not_in_numpy():
     assert (x**3 != x * x * x).sum() > 1000, "numpy's pow no longer differs; re-derive"
     j = jnp.asarray(x)
     np.testing.assert_array_equal(np.asarray(j**3), np.asarray(j * j * j))
+
+
+def test_the_byte_equality_here_is_cancellation_not_agreement(sweep):
+    """What task 50 found, asserted where the claim is made.
+
+    `jnp.exp` and the platform libm disagree on a fifth of this grid's distinct
+    Cunningham arguments. Every row above is nonetheless byte-equal, because
+    `0.4 * ulp(0.37)` is a tenth of `ulp(1.4)` and usually vanishes in the
+    addition at `:266`. `numpy.exp` stands in for gfortran's here -- task 50
+    checked the two against `leaf_exp` on the same arguments and found them
+    identical, which is the whole point: it is XLA that is the odd one out.
+
+    If this ever reports zero disagreements, the grid has moved somewhere the
+    hazard is invisible and the byte equality above stops meaning anything.
+    """
+    live = np.asarray(sweep["mask"]) == 1
+    mfpa, ri, rj = (np.asarray(sweep[k])[live] for k in ("mfpa", "ri", "rj"))
+
+    def disagreements(kn):
+        x = jnp.asarray(np.unique(-1.1 / kn))
+        return int((np.asarray(jnp.exp(x)) != np.exp(np.asarray(x))).sum()), x.size
+
+    m1 = disagreements(np.concatenate([mfpa / ri, mfpa / rj]))
+    m2 = disagreements(mfpa / (0.5 * (ri + rj)))
+    assert m1 == (5, 25), f"method 1 exp disagreements {m1}, measured (5, 25)"
+    assert m2 == (22, 95), f"method 2 exp disagreements {m2}, measured (22, 95)"
 
 
 @pytest.mark.parametrize("icoag", (1, 2, 3))

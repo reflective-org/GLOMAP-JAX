@@ -1062,6 +1062,151 @@
       "content_sha256": "b0b9560ae0fac3c3cf7e4e4645b9b699fc55147a746d69c97eb70fc59e7ee7b8",
       "provenance": {}
     },
+    "coag_kernel.f64.leaf.npz": {
+      "arrays": {
+        "call_coag_on": {
+          "dtype": "<i8",
+          "sha256": "cf13082effef040628c1bfc23578568265236d85a0071737e63f4f45a10eaa55",
+          "shape": [
+            4
+          ]
+        },
+        "call_icoag": {
+          "dtype": "<i8",
+          "sha256": "a68f8c20a0ca4f96895f09a187ea6f5a5cb170e35ac404a7514c4367afecfbb7",
+          "shape": [
+            4
+          ]
+        },
+        "direct_dryj": {
+          "dtype": "<f8",
+          "sha256": "32d1e84f802e03ab0f8562eedbfa89c8e18c659a183096628e87de098b6b42fc",
+          "shape": [
+            7,
+            15,
+            8,
+            8
+          ]
+        },
+        "direct_wetj": {
+          "dtype": "<f8",
+          "sha256": "4bd73d6618e9ee996e02b62169d8f3eec9b13b0622194a366b010eabc6670130",
+          "shape": [
+            7,
+            15,
+            8,
+            8
+          ]
+        },
+        "drydp": {
+          "dtype": "<f8",
+          "sha256": "76a03c252dd7a5c67e57cbdb78ee8eaef519fc9eb957b92697bd46bd5f30f959",
+          "shape": [
+            15,
+            8
+          ]
+        },
+        "dvisc": {
+          "dtype": "<f8",
+          "sha256": "4e938e07575105d863f4b607f730cf01133e7499fd1ebe99ce747488e5719e22",
+          "shape": [
+            15
+          ]
+        },
+        "dvol": {
+          "dtype": "<f8",
+          "sha256": "f76fb7ba99ded812ad7638411e852087ff2d8e3b756b956701308e69fe01ae82",
+          "shape": [
+            15,
+            8
+          ]
+        },
+        "kii": {
+          "dtype": "<f8",
+          "sha256": "f723f4a66a11e96b5d5003e210f95085df7f4623fc6810e0326311412045d9f2",
+          "shape": [
+            7,
+            4,
+            15,
+            8
+          ]
+        },
+        "kij": {
+          "dtype": "<f8",
+          "sha256": "8f59e70c3930c1c9500b63b79d43cb44032ba143772ba51bbc53117dabffda15",
+          "shape": [
+            7,
+            4,
+            15,
+            8,
+            8
+          ]
+        },
+        "mfpa": {
+          "dtype": "<f8",
+          "sha256": "11361bd2531c0e65b12bbcd6f6b48f8053d0e3d45608c54b289b3e65e0524e8d",
+          "shape": [
+            15
+          ]
+        },
+        "mode": {
+          "dtype": "<i4",
+          "sha256": "7d5c85c21ace12231211b7da214bba9425e02f9b4ac9f6a9b43bfc26b928c225",
+          "shape": [
+            7,
+            8
+          ]
+        },
+        "modesol": {
+          "dtype": "<i4",
+          "sha256": "01670f162b48d54d1edb601d1298da6d996810c5354e9bcdab73dd206e2a7d42",
+          "shape": [
+            7,
+            8
+          ]
+        },
+        "rhopar": {
+          "dtype": "<f8",
+          "sha256": "8bb5c363db900d7a1248c08b57392bb20eebbf00f52493ef65ba0baf25ed629c",
+          "shape": [
+            15,
+            8
+          ]
+        },
+        "setups": {
+          "dtype": "<i8",
+          "sha256": "8b65cf9caec41a4c293bc3c849f9f4571f14e4e89161cef297acdaca8baa5297",
+          "shape": [
+            7
+          ]
+        },
+        "t": {
+          "dtype": "<f8",
+          "sha256": "cf09c48aa854f118e4a4e03b1449144c9b80cdfc0e8b70b57eed9ca991350785",
+          "shape": [
+            15
+          ]
+        },
+        "wetdp": {
+          "dtype": "<f8",
+          "sha256": "9e5ce03b08e820688d9631db7f0da71d6a8bb3828ee31b0496093eab14efe9ed",
+          "shape": [
+            15,
+            8
+          ]
+        },
+        "wvol": {
+          "dtype": "<f8",
+          "sha256": "3f5eb77193da51f85fa6770bc9c73bbfecf3e35940f222fa4ec8f2a93316f367",
+          "shape": [
+            15,
+            8
+          ]
+        }
+      },
+      "content_sha256": "100cd7b8a93ad745ecb92e90291ff48f8f7b0626d92e3e3395d6c8210958c1f4",
+      "provenance": {}
+    },
     "coagmode.f64.tables.npz": {
       "arrays": {
         "_case": {

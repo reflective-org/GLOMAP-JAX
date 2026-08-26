@@ -528,3 +528,96 @@ A leaf fixture could be built for them without dry deposition — they take no
 `glomap_variables` — but the routines they feed cannot be validated at all, so
 the coefficient would be a leaf with no tree. Left out until dry deposition is
 in scope; see `docs/unsupported.md`.
+
+## `jnp.exp` is not the platform libm, and byte equality ends where `EXP` begins
+
+Task 50, and the most consequential measurement of phase E.
+
+42 of `ukca_calc_coag_kernel`'s 3,690 non-zero golden outputs differ from the
+compiled routine: 20 at `icoag = 1` (max 1 ulp), 22 at `icoag = 2` (max 3 ulp),
+0 at `icoag = 3`, 0 at `coag_on = 0`. Substituting `numpy.exp` for `jnp.exp`
+inside `coag_coff` makes **all 42 disappear** — asserted by
+`test_the_whole_gap_is_the_exponential`, so the attribution is a test and not
+an argument.
+
+The one call responsible is `EXP(-1.1/kn)` in the Cunningham slip correction,
+`ukca_coag_coff_v.F90:266`. `icoag = 3` replaces that correction with the
+constant `1.591` and reaches no exponential at all; it is byte-equal on every
+setup, which is the control.
+
+`numpy.exp` and gfortran's `EXP` both reach the platform libm and agree bit for
+bit on every argument probed through `leaf_exp`. `jnp.exp` is XLA's own
+evaluation and does not: on the `coag_coff` grid it disagrees on 5 of the 25
+distinct arguments method 1 evaluates and 22 of the 95 method 2 does.
+
+**This is the first ported routine with `EXP` in a live path.** `ukca_vapour`
+reaches only `LOG` and `SQRT` there, `ukca_water_content_v` has no
+transcendental, and neither `calc_drydiam` nor `volume_mode` reaches `EXP`
+anywhere a golden compares. Four phases of byte-equality gating never tested
+what CLAUDE.md's numerics table has recorded since phase B.
+
+### Task 49's byte equality was cancellation, not agreement
+
+`coag_coff` is byte-equal on all 280 rows of its own fixture *despite* those
+disagreements, because `0.4 * ulp(0.37)` is about a tenth of `ulp(1.4)` and
+vanishes in the `1.257 + 0.4*EXP(...)` addition — usually. On the kernel's grid
+it survives on 42 elements.
+
+That is the two phase-D failures one level up. Those were grids too coarse for
+the defect; this is a grid on which the defect **cancels**, which no amount of
+widening the same axes would have found. What found it was a second routine
+consuming the first.
+
+`test_the_byte_equality_here_is_cancellation_not_agreement` now asserts the
+disagreement counts on the `coag_coff` grid, so a future grid edit that hides
+the hazard fails rather than looking cleaner.
+
+### What is gated, and what is not
+
+`tests/test_coag_kernel.py` asserts `ulp = 0` for the paths with no
+exponential and a **same-platform** 4-ulp window for the two that have one,
+plus the exact affected counts so the allowance cannot grow silently. The
+window is deliberately not `assert_matches_reference`'s cross-platform
+allowance: that helper takes the exact branch whenever it runs where the
+goldens were captured, and this gap is on the capture platform itself.
+
+Every remaining routine with an exponential inherits this — `ukca_calcnucrate`,
+`ukca_binapara_mod`, `ukca_conden`'s `1.0-EXP(-sumnc*dtz)`, `ukca_remode`.
+Issue #28.
+
+## `kij_arr` is not one triangle, and nothing below the driver fixes its order
+
+`ukca_calc_coag_kernel` fills three families of slot:
+
+* `:243-262` soluble `imode`, soluble `jmode > imode` — upper triangle of 1..4
+* `:276-291` soluble `imode`, insoluble `jmode >= imode+4` — upper, across the split
+* `:308-322` **insoluble** `imode`, soluble `jmode >= imode-2` — **lower**
+
+19 slots with every mode active, none filled in both orders. Three
+soluble/insoluble pairs are filled in neither — `(2,5)`, `(3,6)`, `(4,7)`
+1-based, the same-size-class pairs — and that is consistent rather than a gap:
+`ukca_coagwithnucl.F90:307`, `:345` and `:467` read with the same three bounds
+and never ask for them. It reads *less*, in fact: its insoluble inner loop
+stops at `topmode`, which is `mode_ait_insol` unless `l_dust_mp_ageing` is on,
+so nine of the slots the kernel fills are unconsumed by default.
+
+**No value comparison can check any of this.** The kernel is byte-symmetric
+under an `(i, j)` swap (task 48) and `coag_mode` is symmetric on all 64 entries
+(phase C), so a transposed convention writes the right number into the wrong
+slot. Transposing the port's `kij_arr` gives an array whose non-zero multiset
+is identical to the golden's — a check that sorted, summed, or symmetrised
+would pass it. Only the zero/non-zero pattern discriminates, which is what
+`test_the_port_fills_the_slots_the_fortran_filled` compares.
+
+## The driver passes an insoluble mode's dry size as `j` and its wet size as `i`
+
+`ukca_calc_coag_kernel.F90:281-286` selects the partner's size by `modesol` —
+soluble partners enter at `wetdp`/`wvol`, insoluble ones at `drydp`/`dvol`.
+The insoluble-`imode` loop at `:297-299` takes `wetdp`/`wvol` unconditionally.
+So the same insoluble mode enters wet when it is `i` and dry when it is `j`.
+
+In the model the two coincide, because an insoluble mode carries no water — and
+that coincidence is exactly what would hide the routing. The leaf grid
+therefore feeds `drydp = 0.7*wetdp` for **every** mode and the capture calls
+`ukca_coag_coff_v` directly under both conventions to see which one each filled
+slot matches: 8 dry, 43 wet, over the seven setups. Measured, not read.

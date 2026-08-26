@@ -541,6 +541,60 @@ CALL ukca_coag_coff_v(n, mask, ri, rj, vi, vj, rhoi, rhoj, mfpa, dvisc, t,     &
 END SUBROUTINE leaf_coag_coff
 
 
+SUBROUTINE leaf_calc_coag_kernel(n, nm, drydp, dvol, wetdp, wvol, rhopar,      &
+                                 mfpa, dvisc, t, coag_on, icoag,               &
+                                 kii_arr, kij_arr, ierr)
+! Setup-DEPENDENT, unlike the two coefficient leaves. ukca_calc_coag_kernel
+! reads glomap_variables%mode and %modesol from the module rather than from a
+! dummy argument, so which mode pairs it visits is decided by i_mode_setup and
+! the capture runs one subprocess per setup.
+!
+! What this driver is for is the SLOT MAP, not the numbers. The numbers come
+! from ukca_coag_coff_v, which task 48 already pinned. What only this routine
+! can settle is which (imode, jmode) entries of kij_arr get written and which
+! are left at the 0.0 of `:239-247` -- and that cannot be checked from the
+! values, because the kernel is byte-symmetric under an (i,j) swap. A
+! transposed transcription writes the right number into the wrong slot, so the
+! zero/non-zero pattern is the only discriminator there is.
+!
+! icoag is guarded here as in leaf_coag_coff: 4 reads never-assigned memory
+! (UP-5) and anything outside 1-3 returns zeros with no diagnostic.
+USE ukca_calc_coag_kernel_mod,     ONLY: ukca_calc_coag_kernel
+USE ukca_mode_setup,               ONLY: nmodes
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, coag_on, icoag
+REAL(KIND=8), INTENT(IN)  :: drydp(n, nm), dvol(n, nm), wetdp(n, nm)
+REAL(KIND=8), INTENT(IN)  :: wvol(n, nm), rhopar(n, nm)
+REAL(KIND=8), INTENT(IN)  :: mfpa(n), dvisc(n), t(n)
+REAL(KIND=8), INTENT(OUT) :: kii_arr(n, nm), kij_arr(n, nm, nm)
+INTEGER,      INTENT(OUT) :: ierr
+
+kii_arr = 0.0
+kij_arr = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes) THEN
+  ierr = 2
+  RETURN
+END IF
+IF (icoag /= 1 .AND. icoag /= 2 .AND. icoag /= 3) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+CALL ukca_calc_coag_kernel(n, kii_arr, kij_arr, drydp, dvol, wetdp, wvol,      &
+                           rhopar, mfpa, dvisc, t, coag_on, icoag)
+END SUBROUTINE leaf_calc_coag_kernel
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !

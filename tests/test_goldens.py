@@ -48,6 +48,7 @@ LEAF_ARCHIVES = {
     "water_content.f64.leaf.npz",
     "cond_coff.f64.leaf.npz",
     "coag_coff.f64.leaf.npz",
+    "coag_kernel.f64.leaf.npz",
 }
 
 # Task 13. The floor is a property of the trajectory over 48 steps of 1800 s.

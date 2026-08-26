@@ -448,12 +448,15 @@ have reference data: the stratospheric override (all four namelists run above
 relative-humidity clamps. The undersize reset is 0 of 3456 `undersize` records
 across all four branch dumps and is now reached by constructed inputs.
 
-## Phase E — the coefficient kernels: **in progress (2 of ~6)**
+## Phase E — the coefficient kernels: **in progress (5 of ~6)**
 
 | # | Task | Commit |
 |---|---|---|
 | 46 | `ukca_cond_coff_v` leaf fixture | `466cb23` |
 | 47 | `ukca_cond_coff_v`, byte-equal | `0fe1f7f` |
+| 48 | `ukca_coag_coff_v` leaf fixture | `c6f42eb` |
+| 49 | `ukca_coag_coff_v`, byte-equal | `de35e20` |
+| 50 | `ukca_calc_coag_kernel` + fixture, all 7 setups | this commit |
 
 **2394 tests pass.** The port is byte-equal to the compiled routine on 24 calls
 x 259 rows x 2 outputs, on the first comparison — worth stating because the
@@ -530,9 +533,57 @@ trajectory enters either. Porting them would be a physics commit with nothing
 to validate it against, which is the ordering rule CLAUDE.md names as the one
 most likely to break under time pressure.
 
-Remaining in phase E: `ukca_coag_coff_v`, the `ukca_calc_coag_kernel` driver
-over mode pairs (which needs `lax.scan` for the `icp` loop only in
-`coagwithnucl`, not here), and their fixtures.
+### Phase E's real finding: byte equality ends where `EXP` begins
+
+**`jnp.exp` is not the platform libm.** 42 of `ukca_calc_coag_kernel`'s 3,690
+non-zero golden outputs differ from the compiled routine — 20 at `icoag = 1`
+(1 ulp), 22 at `icoag = 2` (3 ulp), 0 at `icoag = 3`, 0 at `coag_on = 0`.
+Substituting `numpy.exp` inside `coag_coff` removes **every one**, which is a
+test rather than an argument. The single call responsible is `EXP(-1.1/kn)` at
+`ukca_coag_coff_v.F90:266`; `icoag = 3` replaces it with a constant and is the
+byte-equal control.
+
+`coag_coff` is the **first ported routine with `EXP` in a live path** — vapour
+has only `LOG` and `SQRT` there, water_content none, drydiam and volume_mode
+none a golden compares. Four phases of byte-equality gating never tested what
+CLAUDE.md's numerics table has recorded since phase B, and its "inside
+tolerance" note is now corrected: inside `RTOL_TRANSCENDENTAL`, outside
+`array_equal`.
+
+**Task 49's byte equality was cancellation, not agreement.** `coag_coff` is
+byte-equal on all 280 rows of its own fixture *despite* `jnp.exp` disagreeing on
+5 of 25 and 22 of 95 distinct arguments there, because `0.4*ulp(0.37)` is a
+tenth of `ulp(1.4)` and vanishes in the addition. On the kernel's grid it does
+not. That is the two phase-D failures one level up — not a grid too coarse for
+the defect, but a grid on which the defect cancels, which no widening of the
+same axes would have found. What found it was a second routine consuming the
+first. Issue #28.
+
+### The slot map is the only thing no value can check
+
+`kij_arr` is not one triangle: soluble x larger-soluble and soluble x
+larger-insoluble are upper, **insoluble x smaller-soluble is lower**. 19 slots
+with every mode active, none in both orders, and three same-size-class pairs in
+neither — consistent, because `ukca_coagwithnucl` reads with the same bounds.
+
+The kernel is byte-symmetric under an (i,j) swap and `coag_mode` is symmetric
+on all 64 entries, so a transposed convention writes the right number into the
+wrong slot. Transposing the port's output gives an identical non-zero multiset:
+any check that sorted, summed or symmetrised would pass it. Only the
+zero/non-zero pattern discriminates, and it is compared against a re-derivation
+of the loop bounds rather than against the golden.
+
+### One inconsistency reproduced rather than tidied
+
+The driver passes an insoluble mode's **dry** size when it is the partner
+(`:281-286`) and its **wet** size when it is the subject (`:297-299`). In the
+model those coincide — an insoluble mode carries no water — which is exactly the
+coincidence that would hide the routing, so the leaf grid feeds
+`drydp = 0.7*wetdp` for every mode and the capture measures which convention
+each slot took: 8 dry, 43 wet.
+
+Remaining in phase E: the adversarial review of the phase diff, and a decision
+on #28 before order 2 can claim anything about jit parity.
 
 ## Phases F–K — physics: not started
 
