@@ -16,6 +16,22 @@ The order is forced by the Fortran, not by preference:
 
 Phase C is complete: `modes.py` (the mode tables), `gas_indices.py`,
 `budget_indices.py` and `coag_mode.py`, each with a generated `_*_literals`
-module beside it. The process routines land in phases D onward; see
-PROGRESS.md.
+module beside it.
+
+Phase D is complete: `drydiam.py`, `vapour.py`, `water_content.py` (with
+`water_tables.py`) and `volume_mode.py`, every one byte-equal to the compiled
+routine.
+
+Phase E is in progress: `cond_coff.py` is the condensation coefficient
+(`ukca_cond_coff_v`). The coagulation side -- `ukca_coag_coff_v` and the
+`ukca_calc_coag_kernel` driver over mode pairs -- is next.
+
+`ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` are NOT part of this phase despite
+being coefficient kernels of the same shape. Their only callers are
+`ukca_ddepaer_mod` and `ukca_ddepaer_incl_sedi_mod`, and the box model passes
+`ddepaer = 0` and `sedi = 0` (`glomap_box.F90:144`), so no validated reference
+exists for either. Porting them would be a physics commit with nothing to
+validate it against; see `docs/unsupported.md`.
+
+See PROGRESS.md.
 """
