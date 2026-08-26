@@ -32,6 +32,14 @@ outputs differ by up to 3 ulp because of it. Substituting `numpy.exp` removes
 every one. `icoag = 3`, which reaches no exponential, stays byte-equal. Issue
 #28.
 
+Phase F opens on nucleation. `binapara.py` (`ukca_binapara`) is the whole of
+binary homogeneous nucleation in this model -- `ukca_calcnucrate.F90:257`
+hard-codes the Vehkamaki method, so the Kulmala branch beside it is dead code.
+Its 113 polynomial coefficients are machine-extracted into
+`_binapara_literals.py`, and the capture validates that extraction by
+reproducing the compiled routine bit for bit from them in numpy before it
+writes a golden.
+
 `ukca_dcoff_par_av_k` and `ukca_vgrav_av_k` are NOT part of this phase despite
 being coefficient kernels of the same shape. Their only callers are
 `ukca_ddepaer_mod` and `ukca_ddepaer_incl_sedi_mod`, and the box model passes

@@ -23,8 +23,8 @@
 !   THIS FILE opened with the numerics primitives (task 21, feeding the compat
 !   layer at task 34) and has grown one driver per ported routine since:
 !   vapour, water_content, drydiam and volume_mode in phase D, cond_coff and
-!   coag_coff in phase E. The primitives came first because they are consumed
-!   by remode, volume_mode, the coagulation kernels and binapara alike, and
+!   coag_coff and binapara in phase E-F. The primitives came first because they
+!   are consumed by remode, volume_mode, the coagulation kernels alike, and
 !   because three of them are known hazards where gfortran and XLA need not
 !   agree:
 !
@@ -593,6 +593,42 @@ ierr = 0
 CALL ukca_calc_coag_kernel(n, kii_arr, kij_arr, drydp, dvol, wetdp, wvol,      &
                            rhopar, mfpa, dvisc, t, coag_on, icoag)
 END SUBROUTINE leaf_calc_coag_kernel
+
+
+SUBROUTINE leaf_binapara(n, t, rh, h2so4, jveh, rc, ierr)
+! ukca_binapara is setup-independent -- it reads no glomap table and no config,
+! only its own 113 literal coefficients -- so one process sweeps it whole.
+! Asserted the same way as the two coefficient leaves: the grid runs under two
+! mode setups and the results must be byte-equal.
+!
+! The routine CLAMPS its own inputs (`:106-118`) before doing anything, and
+! then overwrites the local copies, so `t` inside the routine is the clamped
+! temperature and the `t(jl) < 195.15` test at `:251` reads the clamped value
+! rather than the caller's. That matters: a caller passing 150 K gets the
+! 190.15 K answer and does NOT take the cold branch. Swept on both sides of
+! every clamp for that reason.
+USE ukca_binapara_mod, ONLY: ukca_binapara
+USE glomap_f2py_state, ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n
+REAL(KIND=8), INTENT(IN)  :: t(n), rh(n), h2so4(n)
+REAL(KIND=8), INTENT(OUT) :: jveh(n), rc(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+jveh = 0.0
+rc   = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+ierr = 0
+
+CALL ukca_binapara(n, t, rh, h2so4, jveh, rc)
+END SUBROUTINE leaf_binapara
 
 
 ! ---------------------------------------------------------------------------
