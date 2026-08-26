@@ -1158,6 +1158,161 @@
         "_variant": "f64"
       }
     },
+    "cond_coff.f64.leaf.npz": {
+      "arrays": {
+        "_pmid_discriminating": {
+          "dtype": "<i8",
+          "sha256": "22c1e556d1b7eb9c7ad9576c8c7d2d7cb58e7f3101fc9524b3473829c36acbaa",
+          "shape": []
+        },
+        "airdm3": {
+          "dtype": "<f8",
+          "sha256": "fe5ceb2fb5e338fcb3da62d05a7b9c060450f6a2b3b16cd789e170449b549253",
+          "shape": [
+            259
+          ]
+        },
+        "block": {
+          "dtype": "<i4",
+          "sha256": "c353cc52094966fd3185360faf94e6a1dcca1f5daa162c3f49f3425639a45c74",
+          "shape": [
+            259
+          ]
+        },
+        "blocks": {
+          "dtype": "<U16",
+          "sha256": "c167fba4b50340b4e083909522d5fd7deb3396c25ea262db793a72344cc33b9a",
+          "shape": [
+            8
+          ]
+        },
+        "call_difvol": {
+          "dtype": "<f8",
+          "sha256": "08d1851bfa4cf30d2c7a6b95b69f2333dd4fee57fbb7a51fc225beb78ecb53ff",
+          "shape": [
+            24
+          ]
+        },
+        "call_dmol": {
+          "dtype": "<f8",
+          "sha256": "daf0920d911c5336b40c646ed9ab50e8857c5b15f9568479ed3b15c9e665a85e",
+          "shape": [
+            24
+          ]
+        },
+        "call_idcmfp": {
+          "dtype": "<i8",
+          "sha256": "b80798ef32464eb309bd7d441a5620e998a19ba7e396791738a50b2b75c06857",
+          "shape": [
+            24
+          ]
+        },
+        "call_ifuchs": {
+          "dtype": "<i8",
+          "sha256": "213c13f81111d02409ae6b40defabddefe304010a133bb15a6f5272d113b2aec",
+          "shape": [
+            24
+          ]
+        },
+        "call_live": {
+          "dtype": "<i8",
+          "sha256": "d59f4d856f00350f22a4f02fed6d63a1effb2d568592d183eea78022cd587df4",
+          "shape": [
+            24
+          ]
+        },
+        "call_mmcg": {
+          "dtype": "<f8",
+          "sha256": "9f3088f23de3134be351711e3c07039a1a0686f9e82fa34b7cdce80e25fa303d",
+          "shape": [
+            24
+          ]
+        },
+        "call_name": {
+          "dtype": "<U24",
+          "sha256": "ab64f444ca6a64bbc80ccd56386c4559885fd8128e892ea4de8725de889a5685",
+          "shape": [
+            24
+          ]
+        },
+        "call_se": {
+          "dtype": "<f8",
+          "sha256": "0ee681c7b0810a10d402fd61e122245a1c1165fe7eb5ae51dea6aa497e0b3f65",
+          "shape": [
+            24
+          ]
+        },
+        "cc": {
+          "dtype": "<f8",
+          "sha256": "d32212d7977a17bbe96579098b1f62105b2d03845f8a0ad7d14fe89ad6c8f8bc",
+          "shape": [
+            2,
+            24,
+            259
+          ]
+        },
+        "mask": {
+          "dtype": "<i4",
+          "sha256": "3a47b708863aaedb9cf22a53afc5c5dea4f6610f78543d2d363c52439c58fc88",
+          "shape": [
+            259
+          ]
+        },
+        "pmid": {
+          "dtype": "<f8",
+          "sha256": "5d3bdfe934391ed7f2c09b43b471af413da87afb9b18d5c11c1849600ef45e8d",
+          "shape": [
+            259
+          ]
+        },
+        "rhoa": {
+          "dtype": "<f8",
+          "sha256": "970b89eb264cadd59f2957228537cc2d00335dc64f924367ad0a3fd66a267ceb",
+          "shape": [
+            259
+          ]
+        },
+        "rp": {
+          "dtype": "<f8",
+          "sha256": "98598f57941257ef2805eb46bdaad2334b39d755f5a30e1a173f1f99f709f019",
+          "shape": [
+            259
+          ]
+        },
+        "setups": {
+          "dtype": "<i8",
+          "sha256": "f32de89ddb9b4d4125b8641b09a425645789fba9c97cde57caa95ff7dc87b018",
+          "shape": [
+            2
+          ]
+        },
+        "sinkarr": {
+          "dtype": "<f8",
+          "sha256": "7d4fdc4e000293789fb29e981c8970ffdfa0979becb2681df62110f94cf3be47",
+          "shape": [
+            2,
+            24,
+            259
+          ]
+        },
+        "t": {
+          "dtype": "<f8",
+          "sha256": "1b11b99f9641dfa9d3278dbb82b52405cc32e607bed16538faa8d4d178c65ddc",
+          "shape": [
+            259
+          ]
+        },
+        "tsqrt": {
+          "dtype": "<f8",
+          "sha256": "4edfc99e786d8bf48a106f43055d6ee1d5605f69e1b17cd0772a98dae5747c50",
+          "shape": [
+            259
+          ]
+        }
+      },
+      "content_sha256": "7305b84b400578ae616cefc010eb87870d7288cd97fe7e005ccff2dad61f40c2",
+      "provenance": {}
+    },
     "drydiam.f64.leaf.npz": {
       "arrays": {
         "_case": {

@@ -76,6 +76,7 @@ def bind_call(g) -> Callable:
             raise SystemExit(
                 f"{what} returned ierr={int(ierr)} -- "
                 "1 the process is poisoned, 2 a shape disagrees with the module, "
+                "3 a switch is outside the range the driver will run, "
                 "4 wrap_init has not run"
             )
         return result

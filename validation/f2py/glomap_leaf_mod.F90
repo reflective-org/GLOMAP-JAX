@@ -20,8 +20,10 @@
 !   from any shipped namelist, and `ukca_remode` never merges at all. A leaf
 !   driver reaches the inputs the physics can reach.
 !
-!   THIS FILE covers the numerics primitives (task 21, feeding the compat layer
-!   at task 34). They come first because they are consumed by remode,
+!   THIS FILE opened with the numerics primitives (task 21, feeding the compat
+!   layer at task 34) and has grown one driver per ported routine since:
+!   vapour, water_content, drydiam and volume_mode in phase D, cond_coff in
+!   phase E. The primitives came first because they are consumed by remode,
 !   volume_mode, the coagulation kernels and binapara alike, and because three
 !   of them are known hazards where gfortran and XLA need not agree:
 !
@@ -399,6 +401,80 @@ ierr = 0
 CALL ukca_volume_mode(glomap_variables, n, nd, md, mdt, rh, dvol, drydp,       &
                       t, pmid, s, mdwat, wvol, wetdp, rhopar, pvol, pvol_wat)
 END SUBROUTINE leaf_volume_mode
+
+
+SUBROUTINE leaf_cond_coff(n, mask_i, rp, tsqrt, airdm3, rhoa, pmid, t,         &
+                          mmcg, se, dmol, difvol, ifuchs, idcmfp,              &
+                          cc, sinkarr, ierr)
+! ukca_cond_coff_v reads no per-setup table and no glomap_config -- only pi,
+! rmol, boltzmann, avogadro and rgas -- so one process can sweep it whole.
+! That is asserted rather than argued: the capture runs the same grid under two
+! mode setups and requires the two results to be byte-equal, which is the
+! treatment coag_mode got in phase C and for the same reason. "It takes no
+! glomap_variables argument" is an argument about the signature, not a
+! measurement of the answer.
+!
+! `tsqrt` and `t` are separate arguments in the callee and are NOT required to
+! be consistent. idcmfp=1 reads only tsqrt; idcmfp=2 reads only t. The capture
+! sweeps them decoupled in one block precisely to show which output moves with
+! which, the same trick leaf_vapour plays with `rp`.
+!
+! REFUSING THE OUT-OF-RANGE SWITCHES IS THE POINT, not a nicety. Neither
+! switch is validated anywhere upstream: not in ukca_cond_coff_v, not in
+! ukca_conden, not in ukca_aero_step, and not in glomap_box_config_mod, which
+! reads both from the namelist (`:155`). Out of range:
+!
+!   idcmfp /= 1,2  leaves `dcoff_cp` NEVER ASSIGNED, and both Fuchs branches
+!                  read it. The output is whatever was on the stack -- stable
+!                  enough within a process to be captured as a golden and to
+!                  pass every byte-equality test written against it. That is
+!                  exactly the failure mode of issue #19, and the reason task
+!                  31's `budget` table was not captured.
+!
+!   ifuchs /= 1,2  leaves cc and sinkarr at the 0.0 the routine opens with, so
+!                  condensation is silently switched off for every mode and
+!                  every condensable, with no ereport and no diagnostic.
+!
+! Both are findings, and neither is reproduced. `ModelConfig.validate` already
+! rejects both, so the port has no arm here to be faithful to.
+USE ukca_cond_coff_v_mod, ONLY: ukca_cond_coff_v
+USE ukca_types_mod,       ONLY: log_small
+USE glomap_f2py_state,    ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, ifuchs, idcmfp
+INTEGER,      INTENT(IN)  :: mask_i(n)
+REAL(KIND=8), INTENT(IN)  :: rp(n), tsqrt(n), airdm3(n), rhoa(n), pmid(n), t(n)
+REAL(KIND=8), INTENT(IN)  :: mmcg, se, dmol, difvol
+REAL(KIND=8), INTENT(OUT) :: cc(n), sinkarr(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+LOGICAL(KIND=log_small) :: mask(n)
+INTEGER                 :: i
+
+cc      = 0.0
+sinkarr = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF ((ifuchs /= 1 .AND. ifuchs /= 2) .OR.                                       &
+    (idcmfp /= 1 .AND. idcmfp /= 2)) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+DO i = 1, n
+  mask(i) = (mask_i(i) /= 0)
+END DO
+
+CALL ukca_cond_coff_v(n, mask, rp, tsqrt, airdm3, rhoa, mmcg, se, dmol,        &
+                      ifuchs, cc, sinkarr, pmid, t, difvol, idcmfp)
+END SUBROUTINE leaf_cond_coff
 
 
 ! ---------------------------------------------------------------------------

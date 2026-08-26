@@ -39,6 +39,18 @@ BOLTZMANN: Final[float] = 1.3804e-23
 RMOL: Final[float] = 8.314
 """Universal gas constant, J K-1 mol-1. `ukca_config_constants_mod.F90:122`."""
 
+RGAS: Final[float] = 287.05
+"""Gas constant for DRY AIR, J kg-1 K-1. `ukca_config_constants_mod.F90:113`,
+where it is named `r`.
+
+Not a second name for `RMOL`, and the two are one `USE` apart in the same
+routine: `ukca_cond_coff_v.F90:91-93` imports `rmol` from
+`ukca_config_constants_mod` and `rgas => r` from `ukca_um_legacy_mod`, then uses
+`rmol` for the thermal velocity (`:149`) and `rgas` for the molar mass of air
+(`:152`) and the diffusion coefficient (`:158`). They differ by a factor of
+`mm_da`, so swapping them is a 29x error that still produces a positive
+condensation coefficient."""
+
 RHO_SO4: Final[float] = 1769.0
 """Density of a sulfate particle, kg m-3. `ukca_config_constants_mod.F90:131`."""
 
