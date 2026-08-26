@@ -690,6 +690,91 @@ CALL ukca_calcnucrate(n, dtz, t, s, rh, aird, h2so4_out, delh2so4_nucl,        &
 END SUBROUTINE leaf_calcnucrate
 
 
+SUBROUTINE leaf_conden(n, nm, ncp_in, nchem, nbud1, nmins, ifuchs, idcmfp,     &
+                       icondiam, dtz, nd, tsqrt, rhoa, airdm3, wetdp, pmid, t, &
+                       md_in, mdt_in, gc_in, md_out, mdt_out, gc_out,          &
+                       bud_out, delgc_cond, ageterm1, s_cond_s, ierr)
+! Setup-DEPENDENT and the widest leaf in the project so far: ukca_conden reads
+! mode, modesol, num_eps, sigmag and topmode from glomap_variables, and the gas
+! and budget index tables through ukca_setup_indices, so one subprocess per
+! i_mode_setup.
+!
+! md, mdt, gc AND bud_aer_mas are all INTENT(IN OUT). The driver copies each in
+! and hands the result back separately, because a capture that passed one array
+! for both would record the routine's effect on its own input and could not
+! tell a field the routine left alone from one it wrote back unchanged.
+!
+! bud_aer_mas is declared `(nbox,0:nbudaer)` -- a ZERO lower bound, with slot 0
+! the hole every unassigned index points at. f2py cannot express that, so it
+! crosses as `(n, nbud1)` with `nbud1 = nbudaer+1` and column 1 IS slot 0. The
+! extent is asserted rather than assumed: if nbudaer ever changes shape, +1
+! stops being the right offset and this must fail loudly instead of shifting
+! every budget field by one.
+!
+! bud_out is zeroed here rather than taking a caller value. Every write site is
+! an accumulation onto whatever was there, so a non-zero input would make the
+! golden record the sum of the routine's effect and the caller's choice -- and
+! 4 of the 344 sites overwrite rather than accumulate (phase C), which only a
+! zero start can distinguish.
+USE ukca_conden_mod,               ONLY: ukca_conden
+USE ukca_mode_setup,               ONLY: nmodes, nmodes_ins
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE ukca_setup_indices,            ONLY: nchemg, nbudaer
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in, nchem, nbud1, nmins
+INTEGER,      INTENT(IN)  :: ifuchs, idcmfp, icondiam
+REAL(KIND=8), INTENT(IN)  :: dtz
+REAL(KIND=8), INTENT(IN)  :: nd(n, nm), tsqrt(n), rhoa(n), airdm3(n)
+REAL(KIND=8), INTENT(IN)  :: wetdp(n, nm), pmid(n), t(n)
+REAL(KIND=8), INTENT(IN)  :: md_in(n, nm, ncp_in), mdt_in(n, nm), gc_in(n, nchem)
+REAL(KIND=8), INTENT(OUT) :: md_out(n, nm, ncp_in), mdt_out(n, nm), gc_out(n, nchem)
+REAL(KIND=8), INTENT(OUT) :: bud_out(n, nbud1)
+REAL(KIND=8), INTENT(OUT) :: delgc_cond(n, nchem), ageterm1(n, nmins, nchem)
+REAL(KIND=8), INTENT(OUT) :: s_cond_s(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+REAL(KIND=8) :: bud(n, 0:nbud1 - 1)
+INTEGER      :: j
+
+md_out     = md_in
+mdt_out    = mdt_in
+gc_out     = gc_in
+bud_out    = 0.0
+delgc_cond = 0.0
+ageterm1   = 0.0
+s_cond_s   = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp .OR. nchem /= nchemg      &
+    .OR. nbud1 /= nbudaer + 1 .OR. nmins /= nmodes_ins) THEN
+  ierr = 2
+  RETURN
+END IF
+IF ((ifuchs /= 1 .AND. ifuchs /= 2) .OR. (idcmfp /= 1 .AND. idcmfp /= 2)       &
+    .OR. (icondiam /= 1 .AND. icondiam /= 2)) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+bud = 0.0
+CALL ukca_conden(n, nchem, nbudaer, ifuchs, idcmfp, icondiam,                  &
+                 nd, tsqrt, rhoa, airdm3, dtz, wetdp, pmid, t,                 &
+                 md_out, mdt_out, gc_out, bud,                                 &
+                 delgc_cond, ageterm1, s_cond_s)
+DO j = 0, nbud1 - 1
+  bud_out(:, j + 1) = bud(:, j)
+END DO
+END SUBROUTINE leaf_conden
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !

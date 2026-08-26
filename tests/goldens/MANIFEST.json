@@ -1884,6 +1884,254 @@
       "content_sha256": "7305b84b400578ae616cefc010eb87870d7288cd97fe7e005ccff2dad61f40c2",
       "provenance": {}
     },
+    "conden.f64.leaf.npz": {
+      "arrays": {
+        "ageterm1": {
+          "dtype": "<f8",
+          "sha256": "d2ee6af73a47807dc688fda238e38f0413ca879d499f647278eab8acb130f4ea",
+          "shape": [
+            7,
+            2,
+            4,
+            18,
+            4,
+            16
+          ]
+        },
+        "blocks": {
+          "dtype": "<U16",
+          "sha256": "24a47e30af30524c6bf58b85cff0b17d3469f854c5040ddea568474e8dd123f9",
+          "shape": [
+            4
+          ]
+        },
+        "bud": {
+          "dtype": "<f8",
+          "sha256": "c4778910b384a46c40a02e7b4546aba19f414a7cc38c9e0af5d561b3636463cc",
+          "shape": [
+            7,
+            2,
+            4,
+            18,
+            139
+          ]
+        },
+        "combos": {
+          "dtype": "<U16",
+          "sha256": "2f10d7aac6d4d70cf7056a432a9de1f6716a08e11975355853bd9319c511c0d8",
+          "shape": [
+            2
+          ]
+        },
+        "config": {
+          "dtype": "<i8",
+          "sha256": "79beabf20f62c8ab894212b7c2e413bea6cc013045b706292db8e508ed05cc03",
+          "shape": [
+            4,
+            3
+          ]
+        },
+        "delgc": {
+          "dtype": "<f8",
+          "sha256": "e829d66e8ec78c6102b1fe00d1a49185ea5de86ae953a8250c1e7a30f73ea437",
+          "shape": [
+            7,
+            2,
+            4,
+            18,
+            16
+          ]
+        },
+        "dtz": {
+          "dtype": "<f8",
+          "sha256": "21c30402e9cfe7d4d46f78d7db606ff7f7f1bac622cca28fa4d97d5c3fa2882b",
+          "shape": []
+        },
+        "gc": {
+          "dtype": "<f8",
+          "sha256": "90f47d8ff0f08e6bfe91237dfe164c85efa1085b4d133c6f3759d6539af0e5f0",
+          "shape": [
+            7,
+            2,
+            4,
+            18,
+            16
+          ]
+        },
+        "in_airdm3": {
+          "dtype": "<f8",
+          "sha256": "6f92c3c6e095b7678d261a7dcf9cd1277c07cedccdc1bcad2a05cd883416a517",
+          "shape": [
+            18
+          ]
+        },
+        "in_block": {
+          "dtype": "<i4",
+          "sha256": "21220971c6e8295725ffa474268804c973fcb7b5d76b81206fdd025b7ea0823d",
+          "shape": [
+            18
+          ]
+        },
+        "in_gc": {
+          "dtype": "<f8",
+          "sha256": "687907295c3930cca2dcd9f7b021dcb25c68782f40fca9dc20f84b54433b86c8",
+          "shape": [
+            7,
+            2,
+            18,
+            16
+          ]
+        },
+        "in_md": {
+          "dtype": "<f8",
+          "sha256": "a1fc75936ccf51d62bbf063bdfbfe3f9bf26ebb5a01b831825e575925490ceb2",
+          "shape": [
+            7,
+            2,
+            18,
+            8,
+            8
+          ]
+        },
+        "in_mdt": {
+          "dtype": "<f8",
+          "sha256": "cbf000edf6a13f98af28b76848febc6bf6c251ce0a813bc5e93b2f70162e19f5",
+          "shape": [
+            7,
+            2,
+            18,
+            8
+          ]
+        },
+        "in_nd": {
+          "dtype": "<f8",
+          "sha256": "f61f87cbc5b3fbf692a7cc4b1f8d1505475137b82f56b486b4dd1c2d17bde29a",
+          "shape": [
+            18,
+            8
+          ]
+        },
+        "in_pmid": {
+          "dtype": "<f8",
+          "sha256": "afaa90a4dfc72cb8943b01d5a6152d4983200675062dd8835fe7dda64a511214",
+          "shape": [
+            18
+          ]
+        },
+        "in_rhoa": {
+          "dtype": "<f8",
+          "sha256": "d219fad693a10847c4ba958b82004c969685e40f91d1d7da40533ff1f09985de",
+          "shape": [
+            18
+          ]
+        },
+        "in_t": {
+          "dtype": "<f8",
+          "sha256": "f9f8cb16f0496b68853984915df1305fc2a27c6d15a006d3941a79bef0f09b42",
+          "shape": [
+            18
+          ]
+        },
+        "in_tsqrt": {
+          "dtype": "<f8",
+          "sha256": "5cfaa3ec58248a1b9a7b1eeb98c0ab619ac51775d5fa8a00f5492aca536f9887",
+          "shape": [
+            18
+          ]
+        },
+        "in_wetdp": {
+          "dtype": "<f8",
+          "sha256": "93668bee308f8a6573e57cba65607e4f631a82737b86fd42de643319656711b3",
+          "shape": [
+            18,
+            8
+          ]
+        },
+        "md": {
+          "dtype": "<f8",
+          "sha256": "dd386123d969ef08a10bbd903b9f8fcaef3880191f9572b9f1bd4b42627b9121",
+          "shape": [
+            7,
+            2,
+            4,
+            18,
+            8,
+            6
+          ]
+        },
+        "mdt": {
+          "dtype": "<f8",
+          "sha256": "a3dac07116b7ba15778af2970f0143d4617e24edf0a1ea46a91cacabdf601640",
+          "shape": [
+            7,
+            2,
+            4,
+            18,
+            8
+          ]
+        },
+        "mode": {
+          "dtype": "<i4",
+          "sha256": "212e1be955463134b4b806031d463d31f7e2ec0a5d8b497e99d2bf6fd29ae46e",
+          "shape": [
+            7,
+            2,
+            8
+          ]
+        },
+        "nbudaer": {
+          "dtype": "<i8",
+          "sha256": "2d5a05a01a76f7e328cdec08e9a9752700d3b3e8ad4d7f6617f8e19375dd5a84",
+          "shape": [
+            7,
+            2
+          ]
+        },
+        "nchemg": {
+          "dtype": "<i8",
+          "sha256": "38b5ecfa5377c6fd32d59b422371827978e3fd4a87c5de64cd04836abff8973b",
+          "shape": [
+            7,
+            2
+          ]
+        },
+        "ncp": {
+          "dtype": "<i8",
+          "sha256": "8baa7a840517115b3b5548347a83f19324385ba97398bc5dcf7c4b4a82c19e34",
+          "shape": [
+            7,
+            2
+          ]
+        },
+        "s_cond_s": {
+          "dtype": "<f8",
+          "sha256": "9b4f7e7f7289ab5c3cc93beaddfe3d4fa719553013659d655d519230afce991d",
+          "shape": [
+            7,
+            2,
+            4,
+            18
+          ]
+        },
+        "setups": {
+          "dtype": "<i8",
+          "sha256": "8b65cf9caec41a4c293bc3c849f9f4571f14e4e89161cef297acdaca8baa5297",
+          "shape": [
+            7
+          ]
+        },
+        "topmode": {
+          "dtype": "<i8",
+          "sha256": "1eeb63b9cc3f6a33b855f05d468341da74a28db7b8960bea83470aa5bbb5db03",
+          "shape": [
+            7,
+            2
+          ]
+        }
+      },
+      "content_sha256": "58a52b92e2bb043cd1c5c0f3a2eff1776151fa1eadf23f24efc02fa5dd7b9bf6",
+      "provenance": {}
+    },
     "drydiam.f64.leaf.npz": {
       "arrays": {
         "_case": {

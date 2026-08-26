@@ -51,6 +51,7 @@ LEAF_ARCHIVES = {
     "coag_kernel.f64.leaf.npz",
     "binapara.f64.leaf.npz",
     "calcnucrate.f64.leaf.npz",
+    "conden.f64.leaf.npz",
 }
 
 # Task 13. The floor is a property of the trajectory over 48 steps of 1800 s.
