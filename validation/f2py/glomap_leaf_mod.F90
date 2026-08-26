@@ -22,10 +22,11 @@
 !
 !   THIS FILE opened with the numerics primitives (task 21, feeding the compat
 !   layer at task 34) and has grown one driver per ported routine since:
-!   vapour, water_content, drydiam and volume_mode in phase D, cond_coff in
-!   phase E. The primitives came first because they are consumed by remode,
-!   volume_mode, the coagulation kernels and binapara alike, and because three
-!   of them are known hazards where gfortran and XLA need not agree:
+!   vapour, water_content, drydiam and volume_mode in phase D, cond_coff and
+!   coag_coff in phase E. The primitives came first because they are consumed
+!   by remode, volume_mode, the coagulation kernels and binapara alike, and
+!   because three of them are known hazards where gfortran and XLA need not
+!   agree:
 !
 !     * ERF feeds `ukca_remode`'s FRAC_N, cut at 0.5 -- i.e. at erf(x) = 0.
 !       Note this is NOT what decides whether a mode merges: :234 does that
@@ -475,6 +476,69 @@ END DO
 CALL ukca_cond_coff_v(n, mask, rp, tsqrt, airdm3, rhoa, mmcg, se, dmol,        &
                       ifuchs, cc, sinkarr, pmid, t, difvol, idcmfp)
 END SUBROUTINE leaf_cond_coff
+
+
+SUBROUTINE leaf_coag_coff(n, mask_i, ri, rj, vi, vj, rhoi, rhoj, mfpa, dvisc,  &
+                          t, coag_on, icoag, kij, ierr)
+! ukca_coag_coff_v, like ukca_cond_coff_v, reads no per-setup table and no
+! glomap_config -- only pi and boltzmann. Measured the same way: the grid runs
+! under two mode setups and the results must be byte-equal.
+!
+! ICOAG = 4 IS REFUSED, and that refusal is UP-5's disposition made
+! executable. `:339-340` reads mfppi and mfppj, which are assigned only inside
+! the `IF (icoag == 1)` block at `:270`/`:281`. The four IFs are sequential and
+! not exclusive, so icoag = 4 means block 1 did not run and both arrays are
+! read never having been assigned. There is no correct reference to capture:
+! the answer is whatever was on the stack, and it is repeatable enough within
+! one process to pass every byte-equality test written against it. Same class
+! as issue #19, and the reason `docs/unsupported.md` lists icoag = 4 as raising
+! rather than producing plausible garbage.
+!
+! icoag outside {1,2,3,4} is refused too, for the reason ifuchs is: the four
+! blocks are the only writers of kij after `:238` zeroes it, so an unknown
+! value returns kij = 0 everywhere -- coagulation silently switched off, with
+! no ereport. `ModelConfig.validate` already rejects both cases.
+!
+! coag_on IS NOT REFUSED. `:239-242` returns early with kij = 0 when it is
+! zero, which is a real branch of a supported configuration (the box model has
+! a `coag_on` namelist switch) and the only path on which kij is zero for
+! *unmasked* rows. It is swept.
+USE ukca_coag_coff_v_mod, ONLY: ukca_coag_coff_v
+USE ukca_types_mod,       ONLY: log_small
+USE glomap_f2py_state,    ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, coag_on, icoag
+INTEGER,      INTENT(IN)  :: mask_i(n)
+REAL(KIND=8), INTENT(IN)  :: ri(n), rj(n), vi(n), vj(n), rhoi(n), rhoj(n)
+REAL(KIND=8), INTENT(IN)  :: mfpa(n), dvisc(n), t(n)
+REAL(KIND=8), INTENT(OUT) :: kij(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+LOGICAL(KIND=log_small) :: mask(n)
+INTEGER                 :: i
+
+kij = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (icoag /= 1 .AND. icoag /= 2 .AND. icoag /= 3) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+DO i = 1, n
+  mask(i) = (mask_i(i) /= 0)
+END DO
+
+CALL ukca_coag_coff_v(n, mask, ri, rj, vi, vj, rhoi, rhoj, mfpa, dvisc, t,     &
+                      kij, coag_on, icoag)
+END SUBROUTINE leaf_coag_coff
 
 
 ! ---------------------------------------------------------------------------
