@@ -61,5 +61,11 @@ the analytic solver for `dN/dt = A*N^2 + B*N + C`. Its fixture is constructed
 rather than trajectory-derived -- issue #13 -- and that construction turned up
 a ninth branch (issue #31) and the first both-settings evidence for UP-1.
 
+`coagwithnucl.py` (`ukca_coagwithnucl`) completes coagulation, and with it all
+three of nucleation, condensation and coagulation. It carries the first
+demonstration that one of CLAUDE.md's five loop-carried loops really is
+loop-carried: `broadcast=True` evaluates the `icp` loop against the unmutated
+mask and differs on 24 of the fixture's 56 configurations.
+
 See PROGRESS.md.
 """
