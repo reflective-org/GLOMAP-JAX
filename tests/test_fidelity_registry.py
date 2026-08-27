@@ -54,10 +54,7 @@ def _documented_names():
 # Flags no ported code reads yet, with the phase that will. This list must
 # SHRINK; it is not a suppression mechanism. Every entry is a promise.
 NOT_YET_CONSUMED = {
-    "s_cond_s_zero_when_cond_off",  # phase F, task 57
     "drydiam_undersize_reset",  # phase D, task 37
-    "l_fix_ukca_water_content",  # phase D, task 40
-    "l_fix_neg_pvol_wat",  # phase D, task 38
     "checkmd_nd",  # phase I, task 79
     "cbrt_exact",  # phase D, task 36 -- numerics.cbrt takes it as an argument
 }

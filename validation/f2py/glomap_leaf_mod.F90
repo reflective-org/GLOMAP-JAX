@@ -1024,6 +1024,134 @@ n_merge = nm1d
 END SUBROUTINE leaf_remode
 
 
+SUBROUTINE leaf_aero_step(n, nm, ncp_in, nchem, nadv, nbud1,                   &
+                          dtc, dtz, nmts, nzts,                                &
+                          cond_on, nucl_on, coag_on, bln_on, icoag, imerge,    &
+                          ifuchs, idcmfp, icondiam, ibln, i_nuc_method,        &
+                          ichem, intraoff, interoff,                           &
+                          nd_in, mdt_in, md_in, mdwat_in, s0g_in, drydp_in,    &
+                          wetdp_in, rhopar_in, dvol_in, wvol_in,               &
+                          sm, aird, airdm3, rhoa, mfpa, dvisc,                 &
+                          t, tsqrt, rh, rh_clr, s, pmid, pupper, plower,       &
+                          s0g_dot, height, htpblg,                             &
+                          nd_out, mdt_out, md_out, mdwat_out, s0g_out,         &
+                          drydp_out, wetdp_out, rhopar_out, dvol_out,          &
+                          wvol_out, pvol_out, pvol_wat_out, bud_out,           &
+                          n_merge, ierr)
+! ukca_aero_step in the ONE configuration the box model runs, and the whole
+! point of this driver is that it is a sequence rather than a routine: the
+! twenty ported modules have each been checked against the reference on their
+! own and never against each other.
+!
+! The routine takes 96 arguments. This wrapper exposes the ~40 the box model
+! varies and bakes in the rest exactly as `glomap_box.F90:140-163` passes them
+! -- every scavenging, deposition, cloud and nitrate switch off, dryox_in_aer
+! = 1, wetox_in_aer = 0. That is not a simplification of the science: it is the
+! configuration docs/unsupported.md records, and passing 50 zeros through f2py
+! on every call would make the signature unreadable without making it more
+! general.
+!
+! verbose = 0 deliberately. ukca_calcminmaxndmdt and ukca_calcminmaxgc write to
+! umPrint on every process at verbose >= 2, which under this binding means
+! thousands of lines through the shim per capture.
+USE ukca_aero_step_mod,            ONLY: ukca_aero_step
+USE ukca_mode_setup,               ONLY: nmodes
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE ukca_setup_indices,            ONLY: nchemg, nadvg, nbudaer
+USE ukca_types_mod,                ONLY: integer_32
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in, nchem, nadv, nbud1
+INTEGER,      INTENT(IN)  :: nmts, nzts
+INTEGER,      INTENT(IN)  :: cond_on, nucl_on, coag_on, bln_on, icoag, imerge
+INTEGER,      INTENT(IN)  :: ifuchs, idcmfp, icondiam, ibln, i_nuc_method
+INTEGER,      INTENT(IN)  :: ichem, intraoff, interoff
+REAL(KIND=8), INTENT(IN)  :: dtc, dtz
+REAL(KIND=8), INTENT(IN)  :: nd_in(n, nm), mdt_in(n, nm), md_in(n, nm, ncp_in)
+REAL(KIND=8), INTENT(IN)  :: mdwat_in(n, nm), s0g_in(n, nadv)
+REAL(KIND=8), INTENT(IN)  :: drydp_in(n, nm), wetdp_in(n, nm), rhopar_in(n, nm)
+REAL(KIND=8), INTENT(IN)  :: dvol_in(n, nm), wvol_in(n, nm)
+REAL(KIND=8), INTENT(IN)  :: sm(n), aird(n), airdm3(n), rhoa(n), mfpa(n), dvisc(n)
+REAL(KIND=8), INTENT(IN)  :: t(n), tsqrt(n), rh(n), rh_clr(n), s(n)
+REAL(KIND=8), INTENT(IN)  :: pmid(n), pupper(n), plower(n)
+REAL(KIND=8), INTENT(IN)  :: s0g_dot(n, nchem), height(n), htpblg(n)
+REAL(KIND=8), INTENT(OUT) :: nd_out(n, nm), mdt_out(n, nm), md_out(n, nm, ncp_in)
+REAL(KIND=8), INTENT(OUT) :: mdwat_out(n, nm), s0g_out(n, nadv)
+REAL(KIND=8), INTENT(OUT) :: drydp_out(n, nm), wetdp_out(n, nm), rhopar_out(n, nm)
+REAL(KIND=8), INTENT(OUT) :: dvol_out(n, nm), wvol_out(n, nm)
+REAL(KIND=8), INTENT(OUT) :: pvol_out(n, nm, ncp_in), pvol_wat_out(n, nm)
+REAL(KIND=8), INTENT(OUT) :: bud_out(n, nbud1)
+INTEGER,      INTENT(OUT) :: n_merge(n, nm)
+INTEGER,      INTENT(OUT) :: ierr
+
+REAL(KIND=8)             :: bud(n, 0:nbud1 - 1)
+REAL(KIND=8)             :: zeros(n)
+REAL(KIND=8)             :: delso2(n), delso2_2(n)
+INTEGER(KIND=integer_32) :: nm1d(n, nm)
+INTEGER                  :: jlabove(n), ilscat(n), lday(n)
+INTEGER                  :: j
+
+nd_out = nd_in;  mdt_out = mdt_in;  md_out = md_in
+mdwat_out = mdwat_in;  s0g_out = s0g_in
+drydp_out = drydp_in;  wetdp_out = wetdp_in;  rhopar_out = rhopar_in
+dvol_out = dvol_in;  wvol_out = wvol_in
+pvol_out = 0.0;  pvol_wat_out = 0.0;  bud_out = 0.0;  n_merge = 0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp .OR. nchem /= nchemg      &
+    .OR. nadv /= nadvg .OR. nbud1 /= nbudaer + 1) THEN
+  ierr = 2
+  RETURN
+END IF
+ierr = 0
+
+zeros = 0.0
+delso2 = 0.0
+delso2_2 = 0.0
+bud = 0.0
+nm1d = 0
+jlabove = 1
+ilscat = 1
+lday = 1
+
+CALL ukca_aero_step(n, nchem, nadv, nbudaer,                                   &
+  nd_out, mdt_out, md_out, mdwat_out, s0g_out, drydp_out, wetdp_out,           &
+  rhopar_out, dvol_out, wvol_out, sm,                                          &
+  aird, airdm3, rhoa, mfpa, dvisc,                                             &
+  t, tsqrt, rh, rh_clr, s,                                                     &
+  pmid, pupper, plower,                                                        &
+  zeros, zeros, zeros,                                                         &
+  zeros, zeros, zeros,                                                         &
+  zeros, zeros, zeros, zeros, zeros,                                           &
+  zeros, zeros, zeros, zeros, zeros,                                           &
+  ! 0.0 and not 0.0d0: -fdefault-real-8 promotes a plain literal to
+  ! REAL(8), and `d0` promotes it again to REAL(16), which is a type
+  ! mismatch rather than a silent widening.
+  dtc, dtz, nmts, nzts, lday, 0.0, bud,                                      &
+  0, 0,                                                                        &
+  0, 0, 0, 0, 0,                                                               &
+  1, 0, delso2, delso2_2,                                                      &
+  cond_on, nucl_on, coag_on, bln_on, icoag,                                    &
+  imerge, 0, 0, 0.0,                                                         &
+  ifuchs, idcmfp, icondiam, ibln, i_nuc_method,                                &
+  0, 1, 1, ichem, .FALSE., .FALSE.,                                            &
+  0, 0, intraoff, interoff,                                                    &
+  s0g_dot, zeros, zeros, pvol_out, pvol_wat_out,                               &
+  jlabove, ilscat, nm1d, height, htpblg)
+
+DO j = 0, nbud1 - 1
+  bud_out(:, j + 1) = bud(:, j)
+END DO
+n_merge = nm1d
+END SUBROUTINE leaf_aero_step
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !
