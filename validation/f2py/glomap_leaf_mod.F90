@@ -828,6 +828,83 @@ CALL ukca_solvecoagnucl_v(n, mask, a, b, c, nd, dtz, deln)
 END SUBROUTINE leaf_solvecoagnucl
 
 
+SUBROUTINE leaf_coagwithnucl(n, nm, ncp_in, nchem, nbud1, nmsol, nmins,        &
+                             intraoff, interoff, iextra_checks, dtz,           &
+                             nd_in, md_in, mdt_in, delgc_nucl, kii_arr,        &
+                             kij_arr, nd_out, md_out, mdt_out, bud_out,        &
+                             ageterm2, ierr)
+! Setup-DEPENDENT: ukca_coagwithnucl reads mode, component, mfrac_0, mmid,
+! num_eps and topmode from glomap_variables, and coag_mode and the budget
+! indices from ukca_setup_indices. One subprocess per i_mode_setup.
+!
+! nd, md, mdt and bud_aer_mas are all INTENT(IN OUT); each is copied in and
+! handed back separately so a capture cannot mistake the routine's effect on
+! its own input for a field it left alone.
+!
+! bud_aer_mas is (nbox,0:nbudaer) -- the same zero lower bound leaf_conden
+! remaps, with column 1 carrying slot 0, the hole every uncarried index points
+! at. Zeroed here rather than taken from the caller: every one of the 178
+! nmascoag write sites accumulates, so a non-zero start would record the sum of
+! the routine's effect and the caller's choice.
+!
+! iextra_checks IS REFUSED ABOVE 1. `:583` calls ukca_mode_check_mdt when it is
+! 2, which zeroes number concentration for out-of-range modes and so changes
+! mass budgets; docs/unsupported.md records that as not ported, and capturing
+! it would put a reference in the goldens for code this project does not have.
+USE ukca_coagwithnucl_mod,         ONLY: ukca_coagwithnucl
+USE ukca_mode_setup,               ONLY: nmodes, nmodes_sol, nmodes_ins
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE ukca_setup_indices,            ONLY: nchemg, nbudaer
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in, nchem, nbud1, nmsol, nmins
+INTEGER,      INTENT(IN)  :: intraoff, interoff, iextra_checks
+REAL(KIND=8), INTENT(IN)  :: dtz
+REAL(KIND=8), INTENT(IN)  :: nd_in(n, nm), md_in(n, nm, ncp_in), mdt_in(n, nm)
+REAL(KIND=8), INTENT(IN)  :: delgc_nucl(n, nchem)
+REAL(KIND=8), INTENT(IN)  :: kii_arr(n, nm), kij_arr(n, nm, nm)
+REAL(KIND=8), INTENT(OUT) :: nd_out(n, nm), md_out(n, nm, ncp_in), mdt_out(n, nm)
+REAL(KIND=8), INTENT(OUT) :: bud_out(n, nbud1)
+REAL(KIND=8), INTENT(OUT) :: ageterm2(n, nmsol, nmins, ncp_in)
+INTEGER,      INTENT(OUT) :: ierr
+
+REAL(KIND=8) :: bud(n, 0:nbud1 - 1)
+INTEGER      :: j
+
+nd_out   = nd_in
+md_out   = md_in
+mdt_out  = mdt_in
+bud_out  = 0.0
+ageterm2 = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp .OR. nchem /= nchemg      &
+    .OR. nbud1 /= nbudaer + 1 .OR. nmsol /= nmodes_sol .OR. nmins /= nmodes_ins) THEN
+  ierr = 2
+  RETURN
+END IF
+IF (iextra_checks > 1) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+bud = 0.0
+CALL ukca_coagwithnucl(n, nchem, nbudaer, nd_out, md_out, mdt_out,             &
+                       delgc_nucl, dtz, ageterm2, intraoff, interoff, bud,     &
+                       kii_arr, kij_arr, iextra_checks)
+DO j = 0, nbud1 - 1
+  bud_out(:, j + 1) = bud(:, j)
+END DO
+END SUBROUTINE leaf_coagwithnucl
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !
