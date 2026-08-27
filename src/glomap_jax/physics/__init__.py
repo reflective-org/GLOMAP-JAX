@@ -71,8 +71,13 @@ mask and differs on 24 of the fixture's 56 configurations.
 first exact port since phase D, because it is the first routine since then with
 no transcendental in its live path at all.
 
-Still unported: `ukca_remode`, and then the driver. Those are the last two
-things between the ported routines and running them in sequence.
+`remode.py` (`ukca_remode`) is byte-equal on all twenty-one configurations, and
+carries the second demonstration that one of CLAUDE.md's five loops is really
+loop-carried: 210 of its fixture's boxes merge twice, so the second merge reads
+what the first wrote, and `broadcast=True` differs.
+
+**Every routine the box model's active sequence calls is now ported.** What is
+left is the driver that runs them in order.
 
 See PROGRESS.md.
 """

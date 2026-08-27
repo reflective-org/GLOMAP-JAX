@@ -964,6 +964,66 @@ END DO
 END SUBROUTINE leaf_ageing
 
 
+SUBROUTINE leaf_remode(n, nm, ncp_in, nbud1, imerge, nd_in, md_in, mdt_in,     &
+                       drydp, pmid, nd_out, md_out, mdt_out, bud_out,          &
+                       n_merge, ierr)
+! Setup-DEPENDENT. imerge is refused outside {1,2,3}: :215-231 assigns
+! dp_thresh1 and dp_thresh2 only inside those three IFs, so any other value
+! reads both never having been assigned and the merge criterion at :234 becomes
+! whatever was on the stack. ModelConfig already rejects it.
+USE ukca_remode_mod,               ONLY: ukca_remode
+USE ukca_mode_setup,               ONLY: nmodes
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE ukca_setup_indices,            ONLY: nbudaer
+USE ukca_types_mod,                ONLY: integer_32
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in, nbud1, imerge
+REAL(KIND=8), INTENT(IN)  :: nd_in(n, nm), md_in(n, nm, ncp_in), mdt_in(n, nm)
+REAL(KIND=8), INTENT(IN)  :: drydp(n, nm), pmid(n)
+REAL(KIND=8), INTENT(OUT) :: nd_out(n, nm), md_out(n, nm, ncp_in), mdt_out(n, nm)
+REAL(KIND=8), INTENT(OUT) :: bud_out(n, nbud1)
+INTEGER,      INTENT(OUT) :: n_merge(n, nm)
+INTEGER,      INTENT(OUT) :: ierr
+
+REAL(KIND=8)             :: bud(n, 0:nbud1 - 1)
+INTEGER(KIND=integer_32) :: nm1d(n, nm)
+INTEGER                  :: j
+
+nd_out  = nd_in
+md_out  = md_in
+mdt_out = mdt_in
+bud_out = 0.0
+n_merge = 0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp .OR. nbud1 /= nbudaer + 1) THEN
+  ierr = 2
+  RETURN
+END IF
+IF (imerge < 1 .OR. imerge > 3) THEN
+  ierr = 3
+  RETURN
+END IF
+ierr = 0
+
+bud  = 0.0
+nm1d = 0
+CALL ukca_remode(n, nbudaer, nd_out, md_out, mdt_out, drydp, imerge, bud,      &
+                 nm1d, pmid)
+DO j = 0, nbud1 - 1
+  bud_out(:, j + 1) = bud(:, j)
+END DO
+n_merge = nm1d
+END SUBROUTINE leaf_remode
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !

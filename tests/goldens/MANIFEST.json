@@ -18799,6 +18799,155 @@
         "_variant": "f64"
       }
     },
+    "remode.f64.leaf.npz": {
+      "arrays": {
+        "blocks": {
+          "dtype": "<U16",
+          "sha256": "1fb3f2c51ca6642799da33fc7b81ac3eab00bff6b0df68c75a4f0143e7566388",
+          "shape": [
+            5
+          ]
+        },
+        "bud": {
+          "dtype": "<f8",
+          "sha256": "46d6cd6f1edc49163094f8c3cc35435e765feef3a6333559cb16d14189910f8b",
+          "shape": [
+            7,
+            3,
+            17,
+            139
+          ]
+        },
+        "imerges": {
+          "dtype": "<i8",
+          "sha256": "894077f96ce3779dd1010160cd5f42f0242c0878c51f8eb120c7217e6c50cfee",
+          "shape": [
+            3
+          ]
+        },
+        "in_block": {
+          "dtype": "<i4",
+          "sha256": "3a7af0567767b4439d5371a447fbbfb2c9ba922d7bca84c6be3ffd6f5d86ea4e",
+          "shape": [
+            17
+          ]
+        },
+        "in_drydp": {
+          "dtype": "<f8",
+          "sha256": "2ef7fd95af0a81863ef9ce644f79c0c45096cad2135f7bb38b8b61cdd48ef6a5",
+          "shape": [
+            17,
+            8
+          ]
+        },
+        "in_md": {
+          "dtype": "<f8",
+          "sha256": "af6dbd6d31b49e5f937f7869e0452c3f72c3258cb3d559f7181e277ec9f0d4fe",
+          "shape": [
+            7,
+            17,
+            8,
+            8
+          ]
+        },
+        "in_mdt": {
+          "dtype": "<f8",
+          "sha256": "eb12a8161bf8816195d24a584a85639db0e3ae6997a2743597953a4fdb91fbf3",
+          "shape": [
+            7,
+            17,
+            8
+          ]
+        },
+        "in_nd": {
+          "dtype": "<f8",
+          "sha256": "0c21c9fed311ad7624a3b3e04c62bcbd4aaf2d9b8cf8d5efba79ae7b31aa6a1a",
+          "shape": [
+            17,
+            8
+          ]
+        },
+        "in_pmid": {
+          "dtype": "<f8",
+          "sha256": "caa877f4d522de5f274d2552f3cb67e109b8335db24b64eb90faabcbc6cb6631",
+          "shape": [
+            17
+          ]
+        },
+        "md": {
+          "dtype": "<f8",
+          "sha256": "6fbda8b2d569f646d6f2a416d7763ae427ca6df429555b581f45a63ae370e304",
+          "shape": [
+            7,
+            3,
+            17,
+            8,
+            8
+          ]
+        },
+        "mdt": {
+          "dtype": "<f8",
+          "sha256": "892f7c4d8bd6cb9153de4fa5187ac65027f5d994d0fdceed3518cdcf5b4fe474",
+          "shape": [
+            7,
+            3,
+            17,
+            8
+          ]
+        },
+        "mode": {
+          "dtype": "<i4",
+          "sha256": "7d5c85c21ace12231211b7da214bba9425e02f9b4ac9f6a9b43bfc26b928c225",
+          "shape": [
+            7,
+            8
+          ]
+        },
+        "n_merge": {
+          "dtype": "<i4",
+          "sha256": "7de4ec17bc03916925453df3f7f47d8045b1739fe17908346cef074b69a03692",
+          "shape": [
+            7,
+            3,
+            17,
+            8
+          ]
+        },
+        "nbudaer": {
+          "dtype": "<i8",
+          "sha256": "11acecb393a204d550fe2fae073c1789411d9796e993461012c865aade194834",
+          "shape": [
+            7
+          ]
+        },
+        "ncp": {
+          "dtype": "<i8",
+          "sha256": "35db083378a7a365e14cbe39133149cdd0726a788019a7b5cc85e31315790f9e",
+          "shape": [
+            7
+          ]
+        },
+        "nd": {
+          "dtype": "<f8",
+          "sha256": "7cecd4a442a7f3bd6ec73b04e24520c721af205a73d5bde0867dc1507c7c2ec8",
+          "shape": [
+            7,
+            3,
+            17,
+            8
+          ]
+        },
+        "setups": {
+          "dtype": "<i8",
+          "sha256": "8b65cf9caec41a4c293bc3c849f9f4571f14e4e89161cef297acdaca8baa5297",
+          "shape": [
+            7
+          ]
+        }
+      },
+      "content_sha256": "2ca78bb2b9237baa6d75dd51979ca2040806bb3113013f022dbc0979c50572ad",
+      "provenance": {}
+    },
     "solvecoagnucl.f64.leaf.npz": {
       "arrays": {
         "_hits_1a_ok": {
