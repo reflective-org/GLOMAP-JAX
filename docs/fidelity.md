@@ -75,6 +75,50 @@ Vehkamäki guard fail and the BLN factor collapse to `exp(0) = 1`.
 is also why `glomap-box` ships `cond_only`, `coag_only` and `all_off` namelists
 but no `nucl_only`.
 
+## `conden_ocaccins_double_count`
+
+**Default `True` — reproduce the Fortran.** Issue #29, found while extracting
+`ukca_conden`'s write sites for the port.
+
+`ukca_conden.F90:576-587` and `:590-602` are the **same block twice** — same
+guard, same mask, same body, character for character:
+
+```fortran
+IF ((icp == cp_oc) .AND. (nmascondocaccins > 0) .AND.                &
+    (topmode > mode_ait_insol)) THEN
+  WHERE (mask3i(:))
+    deltami(:)=delgc_cond(:,jv)*nc(:,mode_acc_insol)/sumnc(:)
+    bud_aer_mas(:,nmascondocaccins)=                                 &
+    bud_aer_mas(:,nmascondocaccins)+deltami(:)
+    ageterm1(:,mode_ait_sol,jv)=deltami(:)
+  END WHERE
+END IF
+```
+
+It is the only one of the routine's 30 `bud_aer_mas` write sites that repeats —
+30 sites, 29 distinct `(name, delta)` pairs — and
+`validation/extract_conden_literals.py` asserts exactly that, so a future
+upstream fix fails the extraction rather than silently changing the port.
+
+**What doubles and what does not.** `bud_aer_mas` is an accumulation, so
+`nmascondocaccins` reports twice the true condensed flux of secondary organic
+onto the accumulation-insoluble mode. `ageterm1` is an *assignment*, so the
+second write is idempotent and ageing is untouched. `md`/`mdt` are updated from
+`deltams` at `:762-767`, not `deltami`, so the aerosol mass is untouched too.
+Diagnostic-only.
+
+**Reachability.** Needs `icp == cp_oc`, `nmascondocaccins` carried,
+`mode_acc_insol` active and `topmode > mode_ait_insol`.
+`ukca_mode_setup.F90:418-422` sets `topmode = nmodes` only when
+`l_dust_mp_ageing` is on, so the block is dead by default — the same gate UP-10
+turns on. On **setup 8** with that switch it is live, and `validate_config`
+does not constrain the switch.
+
+**Both settings differ, and the test says so.** With the flag off the port
+accumulates the site once; the leaf golden carries setup 8 under both
+`l_dust_mp_ageing` settings, so the two arms are compared against real data
+rather than against each other.
+
 ## `conden_insol_num_eps_by_sol_mode`
 
 **Default `True` — reproduce the Fortran.** Upstream defect UP-10, found during
@@ -122,6 +166,28 @@ UP-10 is unreachable by *configuration*: a legal setting of `l_dust_mp_ageing`
 plus a legal `nd` reaches it, and a UM run with dust microphysical ageing may
 well. The flag records a choice the port will have to make; the missing test is
 tracked, not pretended away.
+
+
+### Both settings now differ, on constructed inputs
+
+This entry said no both-settings test was possible. That was true of every
+fixture the project had at the time and is no longer true.
+
+Task 53's `ukca_conden` leaf grid straddles `num_eps` deliberately rather than
+taking whatever `init_state` produces, and with it the two settings differ on
+**all four setup 8 / `l_dust_mp_ageing` configurations**, moving 4 elements of
+`bud_aer_mas` and 4 of `ageterm1`.
+
+`ageterm1` is **not** a diagnostic: it is the mass `ukca_ageing` transfers from
+the insoluble to the soluble mode. So UP-10 is results-changing, not
+reporting-only, once ageing is ported. `md` and `mdt` do not move here because
+the insoluble gain is deliberately left to that routine — the commented-out
+block at `:769-778` says so in capitals.
+
+`tests/test_conden.py::test_up10_is_results_changing_after_all_on_constructed_inputs`
+pins the counts. This is the case CLAUDE.md has in mind when it says a branch
+no trajectory reaches needs constructed inputs, and it is the first time that
+has actually paid out.
 
 ## `drydiam_undersize_reset`
 

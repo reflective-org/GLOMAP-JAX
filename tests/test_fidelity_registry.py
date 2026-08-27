@@ -30,6 +30,7 @@ FORTRAN_BEHAVIOUR = {
     "ageing_totage_rescale_noop": True,
     "s_cond_s_zero_when_cond_off": True,
     "conden_insol_num_eps_by_sol_mode": True,
+    "conden_ocaccins_double_count": True,
     "drydiam_undersize_reset": True,
     "l_fix_ukca_water_content": True,
     "l_fix_neg_pvol_wat": True,
@@ -56,7 +57,6 @@ NOT_YET_CONSUMED = {
     "coag_intra_factor3",  # phase H, task 66
     "ageing_totage_rescale_noop",  # phase I, task 74
     "s_cond_s_zero_when_cond_off",  # phase F, task 57
-    "conden_insol_num_eps_by_sol_mode",  # phase G, task 62
     "drydiam_undersize_reset",  # phase D, task 37
     "l_fix_ukca_water_content",  # phase D, task 40
     "l_fix_neg_pvol_wat",  # phase D, task 38

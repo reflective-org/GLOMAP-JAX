@@ -83,13 +83,27 @@ class FidelityConfig:
     # too strict. :372 and :382 are no-ops because the entries happen to be
     # equal, and :387 is unreachable -- mode_sup_insol is active only in setups
     # 12 and 13, neither of which the box model implements.
-    # LATENT, not live -- this was called results-changing on setup 8 twice
-    # before it was measured, and that claim is retracted, not qualified:
-    # :377 is gated by topmode > mode_ait_insol, and topmode
-    # is 5 unless l_dust_mp_ageing is set. Force it on with setup 8 and the mask
-    # is still false -- init_state puts nd(mode_acc_insol) at exactly 1e-14 and
-    # the test is strictly greater. No both-settings test is possible yet.
+    # LIVE, on constructed inputs. :377 is gated by topmode > mode_ait_insol,
+    # and topmode is 5 unless l_dust_mp_ageing is set -- so from a TRAJECTORY it
+    # is unreachable, because init_state puts nd(mode_acc_insol) at exactly
+    # 1e-14 and the test is strictly greater. That was recorded here as "no
+    # both-settings test is possible yet", which was true of every fixture the
+    # project then had and is no longer: task 53's leaf grid straddles the
+    # thresholds on purpose, and the two settings differ on all four setup 8 /
+    # dust_ageing configurations, moving 4 elements of bud_aer_mas and 4 of
+    # ageterm1. ageterm1 is not a diagnostic -- it is the mass ukca_ageing
+    # transfers -- so this is results-changing once ageing is ported.
     conden_insol_num_eps_by_sol_mode: bool = True
+
+    # ukca_conden.F90:576-602 is the SAME BLOCK TWICE -- same guard, same body,
+    # character for character. It is the only one of the routine's 30
+    # bud_aer_mas write sites that repeats: 30 sites, 29 distinct (name, delta)
+    # pairs. bud_aer_mas accumulates, so nmascondocaccins reports twice the
+    # true flux; ageterm1 is an assignment so ageing is unaffected, and md/mdt
+    # take deltams so the aerosol mass is unaffected. Diagnostic-only, and
+    # reachable only with l_dust_mp_ageing on setup 8, which is what
+    # topmode > mode_ait_insol turns on. Issue #29.
+    conden_ocaccins_double_count: bool = True
 
     # Not a defect: ukca_calc_drydiam.F90:245-262 silently rewrites md/mdt for
     # modes 1-3 (nuc/ait/acc soluble only, NOT all eight) whose diameter falls
