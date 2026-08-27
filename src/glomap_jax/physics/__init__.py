@@ -56,5 +56,10 @@ rather than transcribed -- 400 lines of near-identical `WHERE` blocks is where
 a hand port drops one, and a golden comparison would show that only as a
 slightly smaller aerosol.
 
+Phase H opens on coagulation. `solvecoagnucl.py` (`ukca_solvecoagnucl_v`) is
+the analytic solver for `dN/dt = A*N^2 + B*N + C`. Its fixture is constructed
+rather than trajectory-derived -- issue #13 -- and that construction turned up
+a ninth branch (issue #31) and the first both-settings evidence for UP-1.
+
 See PROGRESS.md.
 """

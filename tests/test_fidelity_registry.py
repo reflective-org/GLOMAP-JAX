@@ -54,7 +54,6 @@ def _documented_names():
 # Flags no ported code reads yet, with the phase that will. This list must
 # SHRINK; it is not a suppression mechanism. Every entry is a promise.
 NOT_YET_CONSUMED = {
-    "coag_intra_factor3",  # phase H, task 66
     "ageing_totage_rescale_noop",  # phase I, task 74
     "s_cond_s_zero_when_cond_off",  # phase F, task 57
     "drydiam_undersize_reset",  # phase D, task 37

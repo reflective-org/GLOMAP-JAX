@@ -775,6 +775,59 @@ END DO
 END SUBROUTINE leaf_conden
 
 
+SUBROUTINE leaf_solvecoagnucl(n, mask_i, a, b, c, nd, dtz, deln, ierr)
+! ukca_solvecoagnucl_v solves dN/dt = A*N^2 + B*N + C analytically, choosing
+! between five closed forms and one error case. It reads no table and no
+! config -- eps_ab and eps_d are locals -- so one process sweeps it whole.
+!
+! THE ERROR CASE IS FATAL AND THAT MATTERS HERE. `logic1ca` (A /= 0, D == 0,
+! B /= 0) sets ierr = 1 and the routine then calls ereport at `:293`. The real
+! ereport does STOP 1; the shim this binding links returns, so a grid that
+! wandered into that branch would come back with a plausible `deln` computed
+! from `ndnew` left at its initialised `nd` -- a zero increment that looks like
+! "nothing coagulated" rather than "the solver gave up". `bind_call` counts
+! ereports around every call for exactly this reason, so the capture sees it;
+! the branch is probed deliberately rather than avoided.
+!
+! Issue #13: the shipped fixtures reach only 4 of the 8 branch codes. This
+! driver exists to reach the other four, which is what a constructed leaf can
+! do and a trajectory cannot.
+USE ukca_solvecoagnucl_v_mod, ONLY: ukca_solvecoagnucl_v
+! logical_32, not log_small: this routine is the one place in the vendored
+! tree that declares its mask a 4-byte LOGICAL, and passing the 1-byte kind
+! every other driver uses is a compile error rather than a silent
+! reinterpretation. Worth the deviation being visible.
+USE ukca_types_mod,           ONLY: logical_32
+USE glomap_f2py_state,        ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n
+INTEGER,      INTENT(IN)  :: mask_i(n)
+REAL(KIND=8), INTENT(IN)  :: a(n), b(n), c(n), nd(n), dtz
+REAL(KIND=8), INTENT(OUT) :: deln(n)
+INTEGER,      INTENT(OUT) :: ierr
+
+LOGICAL(KIND=logical_32) :: mask(n)
+INTEGER                  :: i
+
+deln = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+ierr = 0
+
+DO i = 1, n
+  mask(i) = (mask_i(i) /= 0)
+END DO
+
+CALL ukca_solvecoagnucl_v(n, mask, a, b, c, nd, dtz, deln)
+END SUBROUTINE leaf_solvecoagnucl
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !
