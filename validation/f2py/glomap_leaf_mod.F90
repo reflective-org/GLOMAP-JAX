@@ -905,6 +905,65 @@ END DO
 END SUBROUTINE leaf_coagwithnucl
 
 
+SUBROUTINE leaf_ageing(n, nm, ncp_in, nchem, nbud1, nmsol, nmins,              &
+                       nd_in, md_in, mdt_in, ageterm1, ageterm2, wetdp,        &
+                       nd_out, md_out, mdt_out, bud_out, ierr)
+! Setup-DEPENDENT: ukca_ageing reads component, mm, mode, num_eps and topmode
+! from glomap_variables and condensable, condensable_choice, mm_gas and dimen
+! from ukca_setup_indices. One subprocess per i_mode_setup.
+!
+! ageterm1 and ageterm2 are INPUTS here, produced by ukca_conden and
+! ukca_coagwithnucl respectively -- both already ported and pinned, which is
+! what makes it legitimate to construct them rather than run the chain.
+! Constructing them is also the only way to reach the ageing branches at all:
+! ageterm1 is zero unless condensation ran onto an insoluble mode, and
+! ageterm2 unless a soluble mode coagulated into one.
+USE ukca_ageing_mod,               ONLY: ukca_ageing
+USE ukca_mode_setup,               ONLY: nmodes, nmodes_sol, nmodes_ins
+USE ukca_config_specification_mod, ONLY: glomap_variables
+USE ukca_setup_indices,            ONLY: nchemg, nbudaer
+USE glomap_f2py_state,             ONLY: is_initialised, must_restart
+IMPLICIT NONE
+INTEGER,      INTENT(IN)  :: n, nm, ncp_in, nchem, nbud1, nmsol, nmins
+REAL(KIND=8), INTENT(IN)  :: nd_in(n, nm), md_in(n, nm, ncp_in), mdt_in(n, nm)
+REAL(KIND=8), INTENT(IN)  :: ageterm1(n, nmins, nchem)
+REAL(KIND=8), INTENT(IN)  :: ageterm2(n, nmsol, nmins, ncp_in)
+REAL(KIND=8), INTENT(IN)  :: wetdp(n, nm)
+REAL(KIND=8), INTENT(OUT) :: nd_out(n, nm), md_out(n, nm, ncp_in), mdt_out(n, nm)
+REAL(KIND=8), INTENT(OUT) :: bud_out(n, nbud1)
+INTEGER,      INTENT(OUT) :: ierr
+
+REAL(KIND=8) :: bud(n, 0:nbud1 - 1)
+INTEGER      :: j
+
+nd_out  = nd_in
+md_out  = md_in
+mdt_out = mdt_in
+bud_out = 0.0
+IF (must_restart) THEN
+  ierr = 1
+  RETURN
+END IF
+IF (.NOT. is_initialised) THEN
+  ierr = 4
+  RETURN
+END IF
+IF (nm /= nmodes .OR. ncp_in /= glomap_variables%ncp .OR. nchem /= nchemg      &
+    .OR. nbud1 /= nbudaer + 1 .OR. nmsol /= nmodes_sol .OR. nmins /= nmodes_ins) THEN
+  ierr = 2
+  RETURN
+END IF
+ierr = 0
+
+bud = 0.0
+CALL ukca_ageing(n, nchem, nbudaer, nd_out, md_out, mdt_out, ageterm1,          &
+                 ageterm2, wetdp, bud)
+DO j = 0, nbud1 - 1
+  bud_out(:, j + 1) = bud(:, j)
+END DO
+END SUBROUTINE leaf_ageing
+
+
 ! ---------------------------------------------------------------------------
 ! Config setters for the two phase-D fidelity flags.
 !

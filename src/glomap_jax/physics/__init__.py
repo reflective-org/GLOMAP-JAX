@@ -67,5 +67,12 @@ demonstration that one of CLAUDE.md's five loop-carried loops really is
 loop-carried: `broadcast=True` evaluates the `icp` loop against the unmutated
 mask and differs on 24 of the fixture's 56 configurations.
 
+`ageing.py` (`ukca_ageing`) is byte-equal on all fourteen configurations -- the
+first exact port since phase D, because it is the first routine since then with
+no transcendental in its live path at all.
+
+Still unported: `ukca_remode`, and then the driver. Those are the last two
+things between the ported routines and running them in sequence.
+
 See PROGRESS.md.
 """

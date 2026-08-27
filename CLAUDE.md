@@ -72,6 +72,16 @@ collide) and over `jv`, `ukca_coagwithnucl`'s `icp` loop, and
 `ukca_water_content_v`'s 12 ion pairs. "Compute all deltas, then apply" changes
 the answer.
 
+**Two of those five are unreachable, measured.** `ukca_coagwithnucl`'s `icp`
+loop is live and demonstrated: `broadcast=True` differs on 24 of its fixture's
+56 configurations (task 57). Both of `ukca_ageing`'s are not. The mode
+collision needs `mode_sup_insol`, which no supported setup activates, so the
+targets are always distinct; and `cp_coag_added` needs two condensable gases on
+one component, which needs `msec_orgi`, absent in every supported setup. Both
+are real in the source and inert here, so neither can have the differs-test
+this paragraph demands — `tests/test_ageing.py` asserts the *reasons*, so the
+day a setup breaks either one, it fails.
+
 None of the five is ported yet, so none has such a test. **Each must get one
 asserting the broadcast version *differs*** — written as part of the port, not
 after it, since a scan that was never wrong is a scan nobody can show is

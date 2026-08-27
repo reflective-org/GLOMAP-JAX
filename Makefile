@@ -73,6 +73,7 @@ capture:
 	$(PY) validation/capture_conden_leaf.py
 	$(PY) validation/capture_solvecoagnucl_leaf.py
 	$(PY) validation/capture_coagwithnucl_leaf.py
+	$(PY) validation/capture_ageing_leaf.py
 
 # Regenerate, then REPORT. This target used to end in `--write`, so the one
 # command that rewrites every golden also re-blessed every one of them --

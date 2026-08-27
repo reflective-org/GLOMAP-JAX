@@ -1,5 +1,183 @@
 {
   "goldens": {
+    "ageing.f64.leaf.npz": {
+      "arrays": {
+        "block": {
+          "dtype": "<i4",
+          "sha256": "423a271caa17a5eefc0a8733b655b381a89fc22535d33d9afca0a9c2b80efefa",
+          "shape": [
+            22
+          ]
+        },
+        "blocks": {
+          "dtype": "<U16",
+          "sha256": "1e79eefa6594d0dbbcf19e169b3b78e50f224320f5e9280d93e4e98e880c1d3f",
+          "shape": [
+            4
+          ]
+        },
+        "bud": {
+          "dtype": "<f8",
+          "sha256": "6a117782c34c156b38c3381010ad3fc503eeb59d8f3d3b3f8226ce8380d2ecfc",
+          "shape": [
+            7,
+            2,
+            22,
+            139
+          ]
+        },
+        "combos": {
+          "dtype": "<U16",
+          "sha256": "2f10d7aac6d4d70cf7056a432a9de1f6716a08e11975355853bd9319c511c0d8",
+          "shape": [
+            2
+          ]
+        },
+        "in_ageterm1": {
+          "dtype": "<f8",
+          "sha256": "afaf55dcb5662461c8a547fca68102b570e32037d9cf1c98eee642ddc88bd55b",
+          "shape": [
+            7,
+            2,
+            22,
+            4,
+            16
+          ]
+        },
+        "in_ageterm2": {
+          "dtype": "<f8",
+          "sha256": "3365ec85f985c122d64414287208d635ac7825d468835982212fd15d1fca0057",
+          "shape": [
+            7,
+            2,
+            22,
+            4,
+            4,
+            8
+          ]
+        },
+        "in_md": {
+          "dtype": "<f8",
+          "sha256": "83207eaee1d5a998a3e846e247761735c191862b78a7560f9d64e05b05d9b2af",
+          "shape": [
+            7,
+            2,
+            22,
+            8,
+            8
+          ]
+        },
+        "in_mdt": {
+          "dtype": "<f8",
+          "sha256": "2f2af120a37c1adcbde58b71d7ef11bcb324250948e07dd8fe399b1436976560",
+          "shape": [
+            7,
+            2,
+            22,
+            8
+          ]
+        },
+        "in_nd": {
+          "dtype": "<f8",
+          "sha256": "6bd673a73df320301d8c027fc96fa00bedfe14821b78c14c98b5c60d43af6365",
+          "shape": [
+            7,
+            2,
+            22,
+            8
+          ]
+        },
+        "in_wetdp": {
+          "dtype": "<f8",
+          "sha256": "ba8f0e84d042ae8e9d125c3482942e2498f2dbbdb75e27b92d353de0dfe55776",
+          "shape": [
+            22,
+            8
+          ]
+        },
+        "md": {
+          "dtype": "<f8",
+          "sha256": "4a1bfe6e12080d9720425455118ff89c5346597693ff404000c4177a176599a8",
+          "shape": [
+            7,
+            2,
+            22,
+            8,
+            8
+          ]
+        },
+        "mdt": {
+          "dtype": "<f8",
+          "sha256": "089998a0a77cf67395176add9517acef505e6b2402ab7f053a80f76f13321184",
+          "shape": [
+            7,
+            2,
+            22,
+            8
+          ]
+        },
+        "mode": {
+          "dtype": "<i4",
+          "sha256": "212e1be955463134b4b806031d463d31f7e2ec0a5d8b497e99d2bf6fd29ae46e",
+          "shape": [
+            7,
+            2,
+            8
+          ]
+        },
+        "nbudaer": {
+          "dtype": "<i8",
+          "sha256": "2d5a05a01a76f7e328cdec08e9a9752700d3b3e8ad4d7f6617f8e19375dd5a84",
+          "shape": [
+            7,
+            2
+          ]
+        },
+        "nchemg": {
+          "dtype": "<i8",
+          "sha256": "38b5ecfa5377c6fd32d59b422371827978e3fd4a87c5de64cd04836abff8973b",
+          "shape": [
+            7,
+            2
+          ]
+        },
+        "ncp": {
+          "dtype": "<i8",
+          "sha256": "8baa7a840517115b3b5548347a83f19324385ba97398bc5dcf7c4b4a82c19e34",
+          "shape": [
+            7,
+            2
+          ]
+        },
+        "nd": {
+          "dtype": "<f8",
+          "sha256": "dc9dee8a7a5291842e2e8dba087e570b9bf06d0cbb753326b1854083a247c4ee",
+          "shape": [
+            7,
+            2,
+            22,
+            8
+          ]
+        },
+        "setups": {
+          "dtype": "<i8",
+          "sha256": "8b65cf9caec41a4c293bc3c849f9f4571f14e4e89161cef297acdaca8baa5297",
+          "shape": [
+            7
+          ]
+        },
+        "topmode": {
+          "dtype": "<i8",
+          "sha256": "1eeb63b9cc3f6a33b855f05d468341da74a28db7b8960bea83470aa5bbb5db03",
+          "shape": [
+            7,
+            2
+          ]
+        }
+      },
+      "content_sha256": "ae94205ce39d883214685c1d2544eb93cc08ae9b6e1c433fe7f2315a880947ca",
+      "provenance": {}
+    },
     "binapara.f64.leaf.npz": {
       "arrays": {
         "_ceilinged": {
