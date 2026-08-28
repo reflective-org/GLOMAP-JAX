@@ -30,6 +30,7 @@ EXTRACTED = {
     "BOLTZMANN": ("ukca_config_constants_mod.F90", "boltzmann"),
     "RMOL": ("ukca_config_constants_mod.F90", "rmol"),
     "RGAS": ("ukca_config_constants_mod.F90", "r"),
+    "REPSILON": ("ukca_config_constants_mod.F90", "repsilon"),
     "RHO_SO4": ("ukca_config_constants_mod.F90", "rho_so4"),
     "RHO_WATER": ("ukca_config_constants_mod.F90", "rho_water"),
     "PI": ("ukca_constants.F90", "pi"),

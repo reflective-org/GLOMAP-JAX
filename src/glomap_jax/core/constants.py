@@ -51,6 +51,13 @@ routine: `ukca_cond_coff_v.F90:91-93` imports `rmol` from
 `mm_da`, so swapping them is a 29x error that still produces a positive
 condensation coefficient."""
 
+REPSILON: Final[float] = 0.62198
+"""Ratio of the molar masses of water and dry air.
+`ukca_config_constants_mod.F90:117`. Reached only by the box model's
+`spec_humid_from_rh`, which fills `s` when the namelist gives
+`spec_humid < 0` -- so it decides the specific humidity that every water-content
+calculation downstream depends on."""
+
 RHO_SO4: Final[float] = 1769.0
 """Density of a sulfate particle, kg m-3. `ukca_config_constants_mod.F90:131`."""
 
