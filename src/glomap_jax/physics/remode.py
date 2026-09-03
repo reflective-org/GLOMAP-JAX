@@ -51,6 +51,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
 from glomap_jax.config.fidelity import FidelityConfig
@@ -66,6 +67,10 @@ P_STRAT = 1.0e4
 #: `:248` and `:259`, both silent upstream.
 FRAC_N_FLOOR = 0.5
 FRAC_M_FLOOR = 0.001
+
+#: sqrt(2) as a Python float, so the scalar divisions stay concrete under jit
+#: (a jnp constant becomes a tracer inside jax.jit; float() of it then fails).
+_SQRT2 = float(np.sqrt(np.float64(2.0)))
 
 
 class RemodeResult(NamedTuple):
@@ -143,12 +148,12 @@ def remode(
         enough = criterion & (src_nd[:, imode] > float(tables.num_eps[imode]))
         n_merge = n_merge.at[:, imode].add(jnp.where(enough, 1, 0))
 
-        log_sigma = float(jnp.log(jnp.asarray(float(tables.sigmag[imode]))))
+        log_sigma = float(np.log(np.float64(tables.sigmag[imode])))
         # `lnratn/SQRT(2.0)/LOG(sigmag)`: two divisions by scalar constants, so
         # two `true_divide`s.
         lnratn = jnp.log(numerics.safe_divide(thresh, dp, enough))
         erfnum = numerics.true_divide(
-            numerics.true_divide(lnratn, float(jnp.sqrt(jnp.asarray(2.0)))), log_sigma
+            numerics.true_divide(lnratn, _SQRT2), log_sigma
         )
         frac_n = 0.5 * (1.0 + jax_erf(erfnum))
         clamp_n = enough & (frac_n < FRAC_N_FLOOR)
@@ -160,7 +165,7 @@ def remode(
         dp2 = jnp.exp(jnp.log(dp) + 3.0 * log2sg)
         lnratm = jnp.log(numerics.safe_divide(thresh, dp2, enough))
         erfmas = numerics.true_divide(
-            numerics.true_divide(lnratm, float(jnp.sqrt(jnp.asarray(2.0)))), log_sigma
+            numerics.true_divide(lnratm, _SQRT2), log_sigma
         )
         frac_m = 0.5 * (1.0 + jax_erf(erfmas))
         clamp_m = enough & (frac_m < FRAC_M_FLOOR)
