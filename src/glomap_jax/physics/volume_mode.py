@@ -828,6 +828,7 @@ def volume_mode(
     *,
     fix_water_content: bool,
     fix_neg_pvol_wat: bool,
+    dry: bool = False,
 ) -> tuple[Array, Array, Array, Array, Array, Array]:
     """`(mdwat, wvol, wetdp, rhopar, pvol, pvol_wat)`, in the Fortran's order.
 
@@ -840,6 +841,17 @@ def volume_mode(
     None of the three `ereport` blocks is ported; see the module docstring for
     which, and why each.
     """
+    if dry:
+        # Explicit dry experiment: additive component volumes and total dry mass.
+        # Bypass BOTH tropospheric water and stratospheric solution density.
+        md_array = jnp.asarray(md, dtype=jnp.float64)
+        member = jnp.asarray(tables.component, dtype=bool)[None, :, : tables.ncp]
+        mass = jnp.where(member, md_array * _Scales(tables).mm_ovravc, 0.0)
+        pvol = mass / jnp.asarray(tables.rhocomp[: tables.ncp])
+        dvol_array = jnp.asarray(dvol, dtype=jnp.float64)
+        rho = jnp.sum(mass, axis=-1) / jnp.where(dvol_array > 0, dvol_array, 1.0)
+        zeros = jnp.zeros_like(dvol_array)
+        return zeros, dvol_array, jnp.asarray(drydp), rho, pvol, zeros
     del mdt  # `:842` only, inside the block that cannot run. See the docstring.
     mdwat_, wvol_, rhopar_, pvol_, pvol_wat_ = partial_volumes(
         tables,

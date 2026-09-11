@@ -125,7 +125,7 @@ def box_env(
     }
 
 
-def _update_size(tables, nd, md, mdt, env, fidelity):
+def _update_size(tables, nd, md, mdt, env, fidelity, *, dry: bool = False):
     """`update_size`. Note `env["rh"]`, not `rh_clr` -- see the module docstring."""
     drydp, dvol, md, mdt = calc_drydiam(tables, nd, md, mdt)
     mdwat, wvol, wetdp, rhopar, pvol, pvol_wat = volume_mode(
@@ -139,6 +139,7 @@ def _update_size(tables, nd, md, mdt, env, fidelity):
         env["t"],
         env["pmid"],
         env["s"],
+        dry=dry,
         fix_water_content=fidelity.l_fix_ukca_water_content,
         fix_neg_pvol_wat=fidelity.l_fix_neg_pvol_wat,
     )
@@ -161,6 +162,7 @@ def init_state(
     h2so4_prod: float = 0.0,
     sec_org_prod: float = 0.0,
     fidelity: FidelityConfig = FidelityConfig(),
+    dry: bool = False,
 ) -> BoxState:
     """`init_state`, including its closing `update_size`."""
     ncp = int(tables.ncp)
@@ -213,7 +215,7 @@ def init_state(
 
     nd_j, md_j, mdt_j = jnp.asarray(nd), jnp.asarray(md), jnp.asarray(mdt)
     md_j, mdt_j, drydp, dvol, wetdp, wvol, mdwat, rhopar, pvol, pvol_wat = _update_size(
-        tables, nd_j, md_j, mdt_j, env, fidelity
+        tables, nd_j, md_j, mdt_j, env, fidelity, dry=dry
     )
     return BoxState(
         nd=nd_j,

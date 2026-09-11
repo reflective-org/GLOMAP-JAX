@@ -122,6 +122,7 @@ def aero_step(
     intraoff: int = 0,
     interoff: int = 0,
     fidelity: FidelityConfig = FidelityConfig(),
+    dry: bool = False,
 ) -> AeroStepResult:
     """One chemistry timestep of microphysics."""
     del dtc  # reaches only the processes this configuration switches off
@@ -133,6 +134,7 @@ def aero_step(
     n_merge = jnp.zeros(nd.shape, dtype=jnp.int32)
 
     vm_kw = {
+        "dry": dry,
         "fix_water_content": fidelity.l_fix_ukca_water_content,
         "fix_neg_pvol_wat": fidelity.l_fix_neg_pvol_wat,
     }
