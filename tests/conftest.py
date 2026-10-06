@@ -45,6 +45,10 @@ RTOL_SOAK = 1e-6
 # The jit/scan driver must agree with the eager one to near machine precision;
 # they are the same arithmetic in a different execution order.
 RTOL_JIT_VS_EAGER = 1e-14
+# Gauss-Hermite mode averaging (FidelityConfig.coag_mode_average="integral")
+# against a higher order and against an independent trapezoid integral. A
+# quadrature error, not a Fortran comparison: there is no Fortran reference.
+RTOL_QUADRATURE = 1e-10
 
 
 def pytest_sessionstart(session):

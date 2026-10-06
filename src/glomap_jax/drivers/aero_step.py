@@ -204,6 +204,8 @@ def aero_step(
             env["t"],
             coag_on=coag_on,
             icoag=icoag,
+            mode_average=fidelity.coag_mode_average,
+            sigmag=tables.sigmag,
         )
 
         for _izts in range(nzts):
