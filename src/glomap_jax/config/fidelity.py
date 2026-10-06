@@ -50,6 +50,17 @@ class FidelityConfig:
     # every trajectory comparison.
     coag_intra_factor3: bool = True
 
+    # NOT an upstream defect -- a comparison control. ukca_calc_coag_kernel
+    # evaluates every coefficient for ONE particle per mode: the geometric-mean
+    # radius (wetdp/2) carrying the mode's mean volume per particle (wvol), which
+    # is exp(4.5 ln^2 sigma) times the volume of the median sphere (Mann et al.
+    # 2010, Eqs. 33-36). "integral" instead averages the same coag_coff pair
+    # kernel over both modes' log-normal number distributions, each quadrature
+    # node a sphere of its own volume at the mode density. Only kii/kij change;
+    # inter-modal mass still moves at the mean mass per particle. "native" is
+    # the Fortran.
+    coag_mode_average: str = "native"
+
     # UP-3. ukca_ageing.F90:296-298 overwrites `naged` before using it as the
     # divisor, so the totage rescale is exactly 1.0. Affects the ageing entries
     # of bud_aer_mas only -- md uses totage1 -- so this changes Gate B budget

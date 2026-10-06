@@ -41,6 +41,33 @@ only grows), which is why it has survived.
 Setting `False` uses the analytic solution and will disagree with every Fortran
 golden.
 
+## `coag_mode_average`
+
+**Default `"native"` — reproduce the Fortran.** Not an upstream defect: a
+comparison control, added so the intercomparison can separate GLOMAP-mode's
+averaging over a mode from its solver (`coag_intra_factor3`).
+
+`ukca_calc_coag_kernel` fills every `kii`/`kij` slot with one call to
+`ukca_coag_coff_v` for a single particle per mode: the geometric-mean radius
+(`wetdp/2`, or `drydp/2` for an insoluble partner) carrying the mode's mean
+volume per particle (`wvol`/`dvol`). That volume is `exp(4.5 ln²σ)` times the
+median sphere's, so at `σ = 1.59` the particle is 2.6 times heavier than the
+median sphere and moves 0.62 times as fast; and a single pair ignores the spread
+of sizes. This is the documented GLOMAP-mode construction (Mann et al. 2010,
+Eqs. 33-36), not a coding error.
+
+`"integral"` keeps the slots, the radii, the densities and the air properties,
+and replaces each coefficient by the average of the same `coag_coff` pair kernel
+over both modes' log-normal number distributions: `MODE_AVERAGE_NODES` = 48
+Gauss-Hermite nodes per mode in ln r, each node a sphere of its own volume.
+Only the coefficients change. Inter-modal mass still moves at each mode's mean
+mass per particle (`ukca_coagwithnucl`), so in multi-mode cases the mass
+carried per transferred particle is not re-weighted.
+
+At 220 K and 50 hPa the native intra-modal coefficient of a `σ = 1.59` mode is
+0.42-0.70 of the integral between 10 nm and 1 µm. Setting `"integral"` will
+disagree with every Fortran golden.
+
 ## `ageing_totage_rescale_noop`
 
 **Default `True` — reproduce the Fortran.** Upstream defect UP-3.

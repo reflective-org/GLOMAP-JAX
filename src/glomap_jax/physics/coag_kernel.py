@@ -63,8 +63,10 @@ indices are Python ints, not traced values.
 from __future__ import annotations
 
 import jax.numpy as jnp
+import numpy as np
 from jax import Array
 
+from glomap_jax.core.constants import PI
 from glomap_jax.physics.coag_coff import coag_coff
 from glomap_jax.physics.modes import (
     MODE_AIT_INSOL,
@@ -116,6 +118,55 @@ def slot_map(mode: Array, modesol: Array) -> tuple[list[int], list[tuple[int, in
     return kii, kij
 
 
+#: Gauss-Hermite order per mode for `mode_average="integral"`. Measured against
+#: 128 nodes over sigma_g 1.4-2.0: 32 nodes are off by 4.9e-10, 40 by 6.2e-11,
+#: 48 by 9.3e-12. 48 is the first inside RTOL_QUADRATURE with margin; the
+#: tests compare it with 96 nodes and with an independent trapezoid integral.
+MODE_AVERAGE_NODES = 48
+
+
+def _mode_averaged(
+    ri: Array, rj: Array, si: float, sj: float, rhoi: Array, rhoj: Array,
+    mfpa: Array, dvisc: Array, t: Array, *, coag_on: int, icoag: int, nodes: int,
+) -> Array:
+    """`<K>` of `coag_coff` over two log-normal number distributions.
+
+    `ri`, `rj` are the geometric-mean radii (one per box) and `si`, `sj` the
+    geometric standard deviations. Each Gauss-Hermite node in ln r is a single
+    sphere of radius `r_k`, so its volume is that sphere's, `(4/3) pi r_k^3`,
+    not the mode's mean volume per particle -- that substitution is the point
+    of the control. Returns `sum_kl w_k w_l K(r_k, r_l)`, the coefficient that
+    makes `dN/dt = -0.5 <K> N^2` (intra-modal) and `-<K> N_i N_j`
+    (inter-modal) exact for the represented distributions.
+    """
+    x, w = np.polynomial.hermite.hermgauss(nodes)
+    w = w / np.sqrt(np.pi)
+    shape = (ri.shape[0], nodes, nodes)
+    node_i = ri[:, None] * jnp.exp(np.sqrt(2.0) * np.log(si) * x)[None, :]
+    node_j = rj[:, None] * jnp.exp(np.sqrt(2.0) * np.log(sj) * x)[None, :]
+    r_i = jnp.broadcast_to(node_i[:, :, None], shape)
+    r_j = jnp.broadcast_to(node_j[:, None, :], shape)
+
+    def box(a: Array) -> Array:
+        return jnp.broadcast_to(jnp.reshape(jnp.asarray(a), (-1, 1, 1)), shape)
+
+    k = coag_coff(
+        jnp.ones(shape, dtype=bool),
+        r_i,
+        r_j,
+        (4.0 / 3.0) * PI * (r_i * r_i * r_i),
+        (4.0 / 3.0) * PI * (r_j * r_j * r_j),
+        box(rhoi),
+        box(rhoj),
+        box(mfpa),
+        box(dvisc),
+        box(t),
+        coag_on=coag_on,
+        icoag=icoag,
+    )
+    return jnp.sum(k * jnp.asarray(np.outer(w, w))[None, :, :], axis=(1, 2))
+
+
 def calc_coag_kernel(
     mode: Array,
     modesol: Array,
@@ -130,6 +181,9 @@ def calc_coag_kernel(
     *,
     coag_on: int,
     icoag: int,
+    mode_average: str = "native",
+    sigmag: Array | None = None,
+    nodes: int | None = None,
 ) -> tuple[Array, Array]:
     """`(kii_arr, kij_arr)`, shapes `(nbox, nmodes)` and `(nbox, nmodes, nmodes)`.
 
@@ -138,7 +192,17 @@ def calc_coag_kernel(
     mask argument is exposed. That is a property of the driver, not of
     `coag_coff`, which is why the mask is swept in the coefficient's own
     fixture and not here.
+
+    `mode_average` is `FidelityConfig.coag_mode_average`: `"native"` (the
+    Fortran) evaluates each slot once at the mean-volume particle; `"integral"`
+    averages the same pair kernel over both modes' log-normal distributions,
+    with widths `sigmag` and `nodes` Gauss-Hermite points per mode.
     """
+    if mode_average not in ("native", "integral"):
+        raise ValueError(f"mode_average={mode_average!r}: expected 'native' or 'integral'")
+    if mode_average == "integral" and sigmag is None:
+        raise ValueError("mode_average='integral' needs sigmag")
+    nodes = MODE_AVERAGE_NODES if nodes is None else nodes
     drydp, dvol = jnp.asarray(drydp), jnp.asarray(dvol)
     wetdp, wvol = jnp.asarray(wetdp), jnp.asarray(wvol)
     rhopar = jnp.asarray(rhopar)
@@ -160,7 +224,15 @@ def calc_coag_kernel(
             return wetdp[:, j] / 2.0, wvol[:, j]
         return drydp[:, j] / 2.0, dvol[:, j]
 
-    def kernel(ri, rj, vi, vj, rhoi, rhoj):
+    def kernel(ri, rj, vi, vj, rhoi, rhoj, i, j):
+        if mode_average == "integral":
+            # FidelityConfig.coag_mode_average: the same slots and radii, the
+            # pair kernel averaged over both distributions instead of evaluated
+            # once for the mean-volume particle. `vi` and `vj` are then unused.
+            return _mode_averaged(
+                ri, rj, float(sigmag[i]), float(sigmag[j]), rhoi, rhoj, mfpa, dvisc, t,
+                coag_on=coag_on, icoag=icoag, nodes=nodes,
+            )
         return coag_coff(
             ones, ri, rj, vi, vj, rhoi, rhoj, mfpa, dvisc, t, coag_on=coag_on, icoag=icoag
         )
@@ -171,14 +243,14 @@ def calc_coag_kernel(
         ri = wetdp[:, imode] / 2.0
         vi = wvol[:, imode]
         rhoi = rhopar[:, imode]
-        kii_arr = kii_arr.at[:, imode].set(kernel(ri, ri, vi, vi, rhoi, rhoi))
+        kii_arr = kii_arr.at[:, imode].set(kernel(ri, ri, vi, vi, rhoi, rhoi, imode, imode))
 
     for imode, jmode in kij_slots:
         ri = wetdp[:, imode] / 2.0
         vi = wvol[:, imode]
         rj, vj = partner(jmode)
         kij_arr = kij_arr.at[:, imode, jmode].set(
-            kernel(ri, rj, vi, vj, rhopar[:, imode], rhopar[:, jmode])
+            kernel(ri, rj, vi, vj, rhopar[:, imode], rhopar[:, jmode], imode, jmode)
         )
 
     return kii_arr, kij_arr

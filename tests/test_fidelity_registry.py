@@ -27,6 +27,7 @@ FIDELITY_DOC = REPO / "docs" / "fidelity.md"
 # table too -- and thereby noticing.
 FORTRAN_BEHAVIOUR = {
     "coag_intra_factor3": True,
+    "coag_mode_average": "native",
     "ageing_totage_rescale_noop": True,
     "s_cond_s_zero_when_cond_off": True,
     "conden_insol_num_eps_by_sol_mode": True,
