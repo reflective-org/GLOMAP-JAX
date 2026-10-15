@@ -24,7 +24,11 @@ is settled and filed as
 table's rows match their own labels (each reproduces its salt's saturated molality at
 its deliquescence RH), so `ukca_volume_mode` is the side that swaps Na and NH4; sea
 salt uses the NH4Cl row and is 4.8–11.7 % smaller wet at RH 50–90 %. Test case in
-glomap-box `upstream/cation/`. The others are not filed yet.
+glomap-box `upstream/cation/`. UP-7 and UP-11 are filed together as
+[MetOffice/ukca#58](https://github.com/MetOffice/ukca/issues/58) (2026-10-15), test
+case in glomap-box `upstream/debug_paths/`; UP-11 is reached only by calling
+`ukca_volume_mode` directly, since `ukca_calc_drydiam` stops first on a zero or
+negative dry size. The others are not filed yet.
 
 Every entry below carries a title, a `file:line`, its reachability, its impact,
 and a **suggested patch** — enough to paste into a tracker without
