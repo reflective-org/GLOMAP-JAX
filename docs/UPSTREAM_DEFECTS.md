@@ -3,9 +3,12 @@
 Eleven defects found in `MetOffice/ukca` @ `387c5bb` while building the
 reference box model and planning this port.
 
-**Status: drafted and submission-ready, not yet filed.** By decision,
+**Status: being filed one at a time, from 2026-10-15.** By decision,
 Reflective files these upstream, not the port. Issue
 [#1](https://github.com/reflective-org/GLOMAP-JAX/issues/1) tracks it.
+Filed so far: UP-1 as
+[MetOffice/ukca#54](https://github.com/MetOffice/ukca/issues/54) (2026-10-15).
+The others are not filed yet.
 
 Every entry below carries a title, a `file:line`, its reachability, its impact,
 and a **suggested patch** — enough to paste into a tracker without
@@ -72,6 +75,11 @@ What each disposition means, and what the test checks:
 | `diagnostic-only` | affects only a print/abort path the port does not reproduce (ADR-006) | no code action; the entry says why the port is unaffected |
 
 ## UP-1 — spurious factor 3 in the `dN/dt = A·N²` branch
+
+**Filed** as [MetOffice/ukca#54](https://github.com/MetOffice/ukca/issues/54)
+on 2026-10-15, with a Fortran test case kept in glomap-box `upstream/up1/`: the
+soluble Aitken mode alone (10,000 cm⁻³, 25 nm, 220 K, 50 hPa, coagulation only)
+ends 72 h at N/N₀ = 0.122 as committed and 0.318 without the 3.
 
 `ukca_solvecoagnucl_v.F90:259` computes `1/(1/N − 3·A·Δt)`; the exact integral
 has no factor 3. The header at `:77` repeats it, so code and comment agree with
