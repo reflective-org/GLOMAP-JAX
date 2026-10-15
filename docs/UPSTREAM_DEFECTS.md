@@ -7,7 +7,9 @@ reference box model and planning this port.
 Reflective files these upstream, not the port. Issue
 [#1](https://github.com/reflective-org/GLOMAP-JAX/issues/1) tracks it.
 Filed so far: UP-1 as
-[MetOffice/ukca#54](https://github.com/MetOffice/ukca/issues/54) (2026-10-15).
+[MetOffice/ukca#54](https://github.com/MetOffice/ukca/issues/54) (2026-10-15);
+UP-5 together with issue #26 (`ifuchs`, `idcmfp` unchecked) as
+[MetOffice/ukca#55](https://github.com/MetOffice/ukca/issues/55) (2026-10-15).
 The others are not filed yet.
 
 Every entry below carries a title, a `file:line`, its reachability, its impact,
@@ -209,6 +211,15 @@ Bit-identical today, by construction. Deleting the guard outright is equally
 defensible and would document the bound instead.
 
 ## UP-5 — `icoag=4` reads unassigned `mfppi`/`mfppj`
+
+**Filed** as [MetOffice/ukca#55](https://github.com/MetOffice/ukca/issues/55)
+on 2026-10-15, together with #26, with a Fortran test case kept in glomap-box
+`upstream/issue2/`. The filed version does **not** suggest the patch below:
+completing `icoag = 4` that way makes its kernel for two 25 nm particles at
+220 K and 50 hPa about 1000 times the `icoag = 1` kernel, and N/N₀ after 72 h
+0.005 against 0.08–0.12 for `icoag` 1–3. It suggests an `ereport` for `icoag`
+outside 1–3 and for `ifuchs` or `idcmfp` outside 1–2 instead, and leaves the
+intended `icoag = 4` formula to the owners.
 
 `ukca_coag_coff_v.F90:340`; both assigned only at `:262`/`:274` inside the
 mutually exclusive `IF (icoag == 1)` at `:252`. Always reads undefined memory.
