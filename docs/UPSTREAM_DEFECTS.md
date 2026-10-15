@@ -10,7 +10,15 @@ Filed so far: UP-1 as
 [MetOffice/ukca#54](https://github.com/MetOffice/ukca/issues/54) (2026-10-15);
 UP-5 together with issue #26 (`ifuchs`, `idcmfp` unchecked) as
 [MetOffice/ukca#55](https://github.com/MetOffice/ukca/issues/55) (2026-10-15).
-The others are not filed yet.
+Also filed, but not in the numbered register below: `icondiam = 2` (the UM setting)
+takes each mode's condensation radius as r_g·exp(½·aa²·ln²σg) at
+`ukca_conden.F90:306`, where Lehtinen et al. (2003) give r_g·exp(½·aa·ln²σg); the
+nucleation and Aitken modes then take up 1.41–1.54 times the exact uptake of their
+size distribution. Filed as
+[MetOffice/ukca#56](https://github.com/MetOffice/ukca/issues/56) (2026-10-15), test
+case in glomap-box `upstream/icondiam/`. The port's `conden` reproduces the Fortran
+(`aa * aa` in `src/glomap_jax/physics/conden.py:176` on `jit-safe` and
+`fix/coag-readiness-20260910`; not yet on `main`). The others are not filed yet.
 
 Every entry below carries a title, a `file:line`, its reachability, its impact,
 and a **suggested patch** — enough to paste into a tracker without
