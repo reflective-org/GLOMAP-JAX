@@ -18,7 +18,13 @@ size distribution. Filed as
 [MetOffice/ukca#56](https://github.com/MetOffice/ukca/issues/56) (2026-10-15), test
 case in glomap-box `upstream/icondiam/`. The port's `conden` reproduces the Fortran
 (`aa * aa` in `src/glomap_jax/physics/conden.py:176` on `jit-safe` and
-`fix/coag-readiness-20260910`; not yet on `main`). The others are not filed yet.
+`fix/coag-readiness-20260910`; not yet on `main`). Issue #24 (Na and NH4 cation slots)
+is settled and filed as
+[MetOffice/ukca#57](https://github.com/MetOffice/ukca/issues/57) (2026-10-15): the
+table's rows match their own labels (each reproduces its salt's saturated molality at
+its deliquescence RH), so `ukca_volume_mode` is the side that swaps Na and NH4; sea
+salt uses the NH4Cl row and is 4.8–11.7 % smaller wet at RH 50–90 %. Test case in
+glomap-box `upstream/cation/`. The others are not filed yet.
 
 Every entry below carries a title, a `file:line`, its reachability, its impact,
 and a **suggested patch** — enough to paste into a tracker without
