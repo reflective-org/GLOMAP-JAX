@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
@@ -7,7 +7,8 @@ name = "glomap-jax"
 version = "0.1.0"
 description = "Differentiable GLOMAP-mode aerosol microphysics in Python/JAX, ported faithfully from the UKCA Fortran"
 readme = "README.md"
-license = { file = "LICENCE" }
+license = "BSD-3-Clause"
+license-files = ["LICENCE", "NOTICE"]
 authors = [{ name = "Ali Akherati", email = "ali@reflective.org" }]
 requires-python = ">=3.11"
 dependencies = [

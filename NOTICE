@@ -1,0 +1,17 @@
+GLOMAP-JAX
+Copyright (c) 2026 Reflective. BSD 3-Clause (see LICENCE).
+
+This software builds on the following work, all under the BSD 3-Clause licence:
+
+- MetOffice/ukca (https://github.com/MetOffice/ukca): UKCA GLOMAP-mode aerosol
+  microphysics. Crown Copyright (c) Met Office; science routines also
+  (c) University of Leeds 2008, licensed to the Met Office under the UKCA
+  collaboration agreement.
+- glomap-box (https://github.com/reflective-org/glomap-box): standalone box
+  driver that vendors the UKCA routines.
+
+The vendored Fortran under fortran/ keeps its original file headers. See
+COPYRIGHT.md and PROVENANCE.md for details.
+
+Not affiliated with, endorsed by, or an official product of the Met Office,
+NCAS, or the University of Leeds.
